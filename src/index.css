@@ -1,0 +1,39 @@
+@import 'tailwindcss';
+
+@font-face {
+  font-family: 'Alimama';
+  src: url(/public/fonts/AlimamaShuHeiTi-Bold.woff2) format('woff2');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'Berkshire';
+  src: url(/public/fonts/Berkshire\ Swash.woff2) format('woff2');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'EBGaramond';
+  src: url(/public/fonts/EBGaramond.woff2) format('woff2');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'Alibaba';
+  src: url(/public/fonts/Alibaba-PuHuiTi-Regular.woff2) format('woff2');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'Anonymous';
+  src:url(/public/fonts/Anonymous-Pro-B-1.woff2)
+}
+/* Utilities 自定义类的样式*/
+@layer utilities {
+}
+@theme {
+  --font-primary: 'Alimama' sans-serif;
+  --font-secondary: 'Alibaba' sans-serif;
+  --font-tertiary: 'Berkshire' sans-serif;
+  --font-quaternary: 'EBGaramond' sans-serif;
+  --font-fifthary: 'Anonymous' sans-serif;
+  --color-font-primary: #00DDFF;
+  --color-font-secondary: #7AF4FF;
+  --color-bg-primary: #BDFAFF;
+}
