@@ -2,38 +2,40 @@
 
 @font-face {
   font-family: 'Alimama';
-  src: url(/public/fonts/AlimamaShuHeiTi-Bold.woff2) format('woff2');
-  font-weight: 400;
+  src: url('/public/fonts/Alimama/AlimamaShuHeiTi-Bold.woff2') format('woff2');
 }
 @font-face {
   font-family: 'Berkshire';
-  src: url(/public/fonts/Berkshire\ Swash.woff2) format('woff2');
-  font-weight: 400;
+  src: url('/public/fonts/Berkshire/Berkshire Swash.woff2') format('woff2');
 }
 @font-face {
   font-family: 'EBGaramond';
-  src: url(/public/fonts/EBGaramond.woff2) format('woff2');
-  font-weight: 400;
+  src: url('/public/fonts/EB/EBGaramond.woff2') format('woff2');
 }
 @font-face {
   font-family: 'Alibaba';
-  src: url(/public/fonts/Alibaba-PuHuiTi-Regular.woff2) format('woff2');
-  font-weight: 400;
+  src: url('/public/fonts/Alibaba/Alibaba-PuHuiTi-Regular.woff2') format('woff2');
 }
 @font-face {
-  font-family: 'Anonymous';
-  src:url(/public/fonts/Anonymous-Pro-B-1.woff2)
+  font-family: "Anonymous";
+  src: url('/public/fonts/Anonymous/Anonymous-Pro-B-1.woff2') format("woff2");
 }
 /* Utilities 自定义类的样式*/
 @layer utilities {
+  .text-stroke {
+    -webkit-text-stroke: 1px #7af4ff; /* 描边宽度和颜色 */
+  }
+  .text-stroke-2 {
+    -webkit-text-stroke: 1px #00ddff; /* 描边宽度和颜色 */
+  }
 }
 @theme {
-  --font-primary: 'Alimama' sans-serif;
-  --font-secondary: 'Alibaba' sans-serif;
-  --font-tertiary: 'Berkshire' sans-serif;
-  --font-quaternary: 'EBGaramond' sans-serif;
-  --font-fifthary: 'Anonymous' sans-serif;
-  --color-font-primary: #00DDFF;
-  --color-font-secondary: #7AF4FF;
-  --color-bg-primary: #BDFAFF;
+  --font-Alimama: 'Alimama' sans-serif;
+  --font-Alibaba: 'Alibaba' sans-serif;
+  --font-Berkshire: 'Berkshire' sans-serif;
+  --font-EBGaramond: 'EBGaramond' sans-serif;
+  --font-Anonymous: 'Anonymous' sans-serif;
+  --color-font-primary: #00ddff;
+  --color-font-secondary: #7af4ff;
+  --color-bg-primary: #bdfaff;
 }
