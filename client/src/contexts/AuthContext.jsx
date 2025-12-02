@@ -1,5 +1,5 @@
 import { createContext, useState, useContext, useEffect } from 'react';
-import { login as loginApi, getCurrentUser, logout as logoutApi } from '../api/auth';
+import { login as loginApi, register as registerApi, getCurrentUser, logout as logoutApi } from '../api/auth';
 
 const AuthContext = createContext(null);
 
@@ -61,7 +61,7 @@ export const AuthProvider = ({ children }) => {
     try {
       setError(null);
       setLoading(true);
-      const response = await loginApi(userData);
+      const response = await registerApi(userData);
       const { token, user: newUser } = response;
 
       localStorage.setItem('token', token);

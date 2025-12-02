@@ -155,7 +155,7 @@ export const initSocket = (server) => {
           userId: mentionedUserId,
           type: 'mention',
           title: '新的@提及',
-          content: `${socket.username} 在${getTypeName(targetType)中提到了您: "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}"`,
+          content: `${socket.username} 在${getTypeName(targetType)}中提到了您: "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}"`,
           fromUserId: socket.userId,
           fromUsername: socket.username,
           relatedType: targetType,

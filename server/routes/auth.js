@@ -63,7 +63,7 @@ router.post('/register', [
     try {
       // 在MySQL中创建用户
       const [userResult] = await connection.execute(
-        'INSERT INTO users (username, email, password) VALUES (?, ?, ?)',
+        'INSERT INTO users (username, email, passwordHash, createdAt, updatedAt) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)',
         [username, email, hashedPassword]
       );
 
@@ -134,7 +134,7 @@ router.post('/login', [
 
     // 查找用户（支持用户名或邮箱登录）
     const [users] = await pool.execute(
-      'SELECT id, username, email, password FROM users WHERE username = ? OR email = ?',
+      'SELECT id, username, email, passwordHash FROM users WHERE username = ? OR email = ?',
       [loginId, loginId]
     );
 
@@ -147,7 +147,7 @@ router.post('/login', [
     const user = users[0];
 
     // 验证密码
-    const isValidPassword = await bcrypt.compare(password, user.password);
+    const isValidPassword = await bcrypt.compare(password, user.passwordHash);
     if (!isValidPassword) {
       return res.status(401).json({
         error: '用户名或密码错误'
@@ -156,7 +156,7 @@ router.post('/login', [
 
     // 更新最后登录时间
     await pool.execute(
-      'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?',
+      'UPDATE users SET lastLoginAt = CURRENT_TIMESTAMP WHERE id = ?',
       [user.id]
     );
 

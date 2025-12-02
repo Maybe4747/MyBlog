@@ -1,9 +1,15 @@
-import express from 'express';
-import { createServer } from 'http';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+// 必须在最顶部配置dotenv
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.join(__dirname, '.env') });
+
+// 现在导入其他模块
+import express from 'express';
+import { createServer } from 'http';
 import app from './app.js';
 import {
   initMySQL,
@@ -14,11 +20,6 @@ import {
 } from './config/database.js';
 import { initSocket } from './socket/handler.js';
 import { initSearchEngine } from './utils/search.js';
-
-dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 3001;
 
@@ -31,17 +32,33 @@ const initialize = async () => {
 
     // 初始化数据库
     console.log('📦 初始化数据库...');
+    console.log('  → 正在连接MySQL...');
     await initMySQL();
+    console.log('  → MySQL连接完成');
+    console.log('  → 正在连接MongoDB...');
     await initMongoDB();
-    await initRedis();
+    console.log('  → MongoDB连接完成');
+    console.log('  → 正在连接Redis...');
+    const redisClient = await initRedis();
+    console.log('  → Redis连接完成');
 
-    // 初始化搜索引擎
+    // 初始化搜索引擎（可选）
     console.log('🔍 初始化搜索引擎...');
-    const searchReady = await initSearchEngine();
+    try {
+      const searchReady = await initSearchEngine();
+      console.log('  → 搜索引擎初始化完成');
+    } catch (err) {
+      console.log('⚠️  搜索服务初始化跳过:', err.message);
+    }
 
     // 初始化Socket.IO
     console.log('⚡ 初始化WebSocket...');
-    initSocket(server);
+    try {
+      initSocket(server);
+      console.log('  → WebSocket初始化完成');
+    } catch (err) {
+      console.log('⚠️  WebSocket初始化跳过:', err.message);
+    }
 
     console.log('\n✅ 所有服务初始化完成\n');
 

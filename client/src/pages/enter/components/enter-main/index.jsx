@@ -34,12 +34,12 @@ const EnterMain = () => {
       </div>
       <NavLink to="/home">
         <button className="px-6 py-2 border-1 border-font-secondary rounded-2xl shadow-md text-3xl mt-10 font-Anonymous cursor-pointer">
-          <p className="bg-clip-text text-transparent bg-radial from-[#C7F2C4] to-font-primary">
+          <p className="bg-clip-text text-transparent bg-radial from-[#7AF4FF] to-font-primary">
             enter
           </p>
         </button>
       </NavLink>
-      <div className="fixed bottom-24 right-24 h-60 w-60 bg-[#3dfafc] blur-[60px] rounded-full"></div>
+      <div className="fixed bottom-24 right-24 h-60 w-60 bg-[#7AF4FF] blur-[60px] rounded-full"></div>
     </div>
   );
 };

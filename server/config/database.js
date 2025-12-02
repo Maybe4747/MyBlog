@@ -2,6 +2,14 @@ import mysql from 'mysql2/promise';
 import mongoose from 'mongoose';
 import { createClient } from 'redis';
 import { Client } from '@elastic/elasticsearch';
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// 确保dotenv已配置
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
 // MySQL连接池配置
 const mysqlConfig = {
@@ -12,10 +20,7 @@ const mysqlConfig = {
   database: process.env.MYSQL_DATABASE || 'career_platform',
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0,
-  acquireTimeout: 60000,
-  timeout: 60000,
-  reconnect: true
+  queueLimit: 0
 };
 
 // MongoDB连接配置
@@ -100,17 +105,12 @@ export const initRedis = async () => {
   try {
     redisClient = createClient(redisConfig);
 
-    redisClient.on('error', (err) => {
-      console.error('Redis连接错误:', err);
-    });
-
     await redisClient.connect();
     console.log('✅ Redis连接成功');
-
     return redisClient;
   } catch (error) {
-    console.error('❌ Redis连接失败:', error.message);
-    throw error;
+    console.log('⚠️  警告: 缓存功能将不可用，请确保Redis服务正在运行');
+    return null;
   }
 };
 
@@ -147,9 +147,6 @@ export const getMySQLPool = () => {
  * 获取Redis客户端
  */
 export const getRedisClient = () => {
-  if (!redisClient) {
-    throw new Error('Redis客户端未初始化');
-  }
   return redisClient;
 };
 
@@ -171,8 +168,12 @@ export const closeConnections = async () => {
     }
 
     if (redisClient) {
-      await redisClient.quit();
-      console.log('Redis连接已关闭');
+      try {
+        await redisClient.quit();
+        console.log('Redis连接已关闭');
+      } catch (err) {
+        console.log('Redis连接关闭跳过');
+      }
     }
 
     if (mongoose.connection) {
