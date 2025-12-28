@@ -21,7 +21,7 @@ router.get('/download/:fileId', authenticateToken, async (req, res) => {
     const userId = req.user.id;
 
     // TODO: 根据 fileId 查找文件信息
-    // 这里需要从 MongoDB 中查询
+    // 这里需要从 MySQL 中查询
 
     // 示例路径
     const filePath = path.join(__dirname, '../uploads', userId.toString(), fileId);

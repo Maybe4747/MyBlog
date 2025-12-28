@@ -103,37 +103,35 @@ CREATE TABLE `follows` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='关注关系表';
 
 -- ----------------------------
--- 点赞记录表
+-- 文件点赞表
 -- ----------------------------
-CREATE TABLE `likes` (
+CREATE TABLE `file_likes` (
   `id` int NOT NULL AUTO_INCREMENT,
-  `user_id` int NOT NULL COMMENT '用户ID',
-  `target_type` enum('file','comment','post') NOT NULL COMMENT '点赞目标类型',
-  `target_id` varchar(24) NOT NULL COMMENT '点赞目标ID（MongoDB ObjectId）',
+  `file_id` int NOT NULL COMMENT '文件ID',
+  `user_id` int NOT NULL COMMENT '点赞用户ID',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `unique_like` (`user_id`,`target_type`,`target_id`),
-  KEY `idx_user` (`user_id`),
-  KEY `idx_target` (`target_type`,`target_id`),
+  UNIQUE KEY `file_user_like` (`file_id`, `user_id`),
+  FOREIGN KEY (`file_id`) REFERENCES `user_files` (`id`) ON DELETE CASCADE,
   FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='点赞记录表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文件点赞表';
 
 -- ----------------------------
--- 评论表（MySQL中存储引用，主要内容在MongoDB中）
+-- 用户留言表
 -- ----------------------------
-CREATE TABLE `comments` (
+CREATE TABLE `messages` (
   `id` int NOT NULL AUTO_INCREMENT,
-  `user_id` int NOT NULL COMMENT '评论者ID',
-  `target_type` enum('file','comment','post') NOT NULL COMMENT '评论目标类型',
-  `target_id` varchar(24) NOT NULL COMMENT '评论目标ID（MongoDB ObjectId）',
-  `mongodb_id` varchar(24) NOT NULL COMMENT 'MongoDB中的评论ID',
+  `user_id` int NOT NULL COMMENT '留言者ID',
+  `profile_user_id` int NOT NULL COMMENT '目标用户ID（被留言的用户）',
+  `content` text NOT NULL COMMENT '留言内容',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  KEY `idx_target` (`target_type`,`target_id`),
+  KEY `idx_profile_user` (`profile_user_id`),
   KEY `idx_user` (`user_id`),
-  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='评论表';
+  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`profile_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户留言表';
 
 -- ----------------------------
 -- 通知表
@@ -146,7 +144,7 @@ CREATE TABLE `notifications` (
   `content` varchar(500) NOT NULL COMMENT '通知内容',
   `from_user_id` int DEFAULT NULL COMMENT '发送通知的用户ID',
   `related_type` enum('file','comment','profile','message') DEFAULT NULL COMMENT '关联类型',
-  `related_id` varchar(24) DEFAULT NULL COMMENT '关联ID（MongoDB ObjectId）',
+  `related_id` int DEFAULT NULL COMMENT '关联ID',
   `is_read` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否已读',
   `read_at` timestamp NULL DEFAULT NULL COMMENT '阅读时间',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -172,6 +170,117 @@ CREATE TABLE `user_sessions` (
   KEY `idx_expires` (`expires_at`),
   FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户会话表';
+
+-- ----------------------------
+-- 用户社交链接表
+-- ----------------------------
+CREATE TABLE `user_social_links` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL COMMENT '用户ID',
+  `platform` varchar(50) NOT NULL COMMENT '平台名称（如github,linkedin等）',
+  `url` varchar(255) NOT NULL COMMENT '链接URL',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `user_platform` (`user_id`, `platform`),
+  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户社交链接表';
+
+-- ----------------------------
+-- 用户隐私设置表
+-- ----------------------------
+CREATE TABLE `user_privacy_settings` (
+  `user_id` int NOT NULL COMMENT '用户ID',
+  `profile_visibility` enum('public','followers','private') DEFAULT 'public' COMMENT '个人资料可见性',
+  `show_email` tinyint(1) DEFAULT 0 COMMENT '是否显示邮箱',
+  `show_activity` tinyint(1) DEFAULT 1 COMMENT '是否显示活动',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`user_id`),
+  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户隐私设置表';
+
+-- ----------------------------
+-- 文件表
+-- ----------------------------
+CREATE TABLE `user_files` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL COMMENT '上传者用户ID',
+  `filename` varchar(255) NOT NULL COMMENT '存储的文件名',
+  `original_name` varchar(255) NOT NULL COMMENT '原始文件名',
+  `mime_type` varchar(100) NOT NULL COMMENT 'MIME类型',
+  `size` int NOT NULL COMMENT '文件大小(字节)',
+  `category` enum('document','image','video','audio','other') NOT NULL COMMENT '文件分类',
+  `title` varchar(100) NOT NULL COMMENT '文件标题',
+  `description` text COMMENT '文件描述',
+  `visibility` enum('public','followers','private') DEFAULT 'public' COMMENT '可见性',
+  `download_count` int DEFAULT 0 COMMENT '下载次数',
+  `uploaded_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '上传时间',
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_user_id` (`user_id`),
+  KEY `idx_category` (`category`),
+  KEY `idx_visibility` (`visibility`),
+  KEY `idx_uploaded_at` (`uploaded_at`),
+  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户文件表';
+
+-- ----------------------------
+-- 留言点赞表
+-- ----------------------------
+CREATE TABLE `message_likes` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `message_id` int NOT NULL COMMENT '留言ID',
+  `user_id` int NOT NULL COMMENT '点赞用户ID',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `message_user_like` (`message_id`, `user_id`),
+  FOREIGN KEY (`message_id`) REFERENCES `messages` (`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='留言点赞表';
+
+-- ----------------------------
+-- 文件标签表
+-- ----------------------------
+CREATE TABLE `file_tags` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `file_id` int NOT NULL COMMENT '文件ID',
+  `tag` varchar(50) NOT NULL COMMENT '标签',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `file_tag` (`file_id`, `tag`),
+  FOREIGN KEY (`file_id`) REFERENCES `user_files` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文件标签表';
+
+-- ----------------------------
+-- 文件点赞表
+-- ----------------------------
+CREATE TABLE `file_likes` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `file_id` int NOT NULL COMMENT '文件ID',
+  `user_id` int NOT NULL COMMENT '点赞用户ID',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `file_user_like` (`file_id`, `user_id`),
+  FOREIGN KEY (`file_id`) REFERENCES `user_files` (`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文件点赞表';
+
+-- ----------------------------
+-- 文件评论表
+-- ----------------------------
+CREATE TABLE `file_comments` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `file_id` int NOT NULL COMMENT '文件ID',
+  `user_id` int NOT NULL COMMENT '评论用户ID',
+  `content` text NOT NULL COMMENT '评论内容',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_file_id` (`file_id`),
+  KEY `idx_user_id` (`user_id`),
+  FOREIGN KEY (`file_id`) REFERENCES `user_files` (`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文件评论表';
 
 -- ----------------------------
 -- 系统配置表

@@ -1,9 +1,10 @@
 import express from 'express';
 import { body, validationResult } from 'express-validator';
-import Profile from '../models/Profile.js';
-import User from '../models/User.js';
 import { authenticateToken } from '../middleware/auth.js';
-import { getFileCategory, generateFileUrl } from '../utils/upload.js';
+import { getFileCategory } from '../utils/upload.js';
+import { createFile, updateFile, deleteFile, getFileById } from '../services/fileService.js';
+import { likeFile } from '../services/socialService.js';
+import { getMySQLPool } from '../config/database.js';
 
 const router = express.Router();
 
@@ -15,19 +16,56 @@ const router = express.Router();
 router.get('/my', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
+    const pool = getMySQLPool();
 
-    let profile = await Profile.findOne({ userId });
+    // 获取用户的基本信息
+    const [users] = await pool.execute(
+      `SELECT u.id, u.username, u.email, u.avatar, u.created_at, u.updated_at, u.last_login,
+               up.bio, up.location, up.website, up.company, up.position
+       FROM users u
+       LEFT JOIN user_profiles up ON u.id = up.user_id
+       WHERE u.id = ?`,
+      [userId]
+    );
 
-    if (!profile) {
-      // 如果档案不存在，创建一个
-      profile = await Profile.create({ userId });
+    if (users.length === 0) {
+      return res.status(404).json({
+        error: '用户不存在'
+      });
     }
+
+    // 获取用户文件统计
+    const [filesCount] = await pool.execute(
+      'SELECT COUNT(*) as count FROM user_files WHERE user_id = ?',
+      [userId]
+    );
+
+    const [totalDownloads] = await pool.execute(
+      'SELECT COALESCE(SUM(download_count), 0) as total FROM user_files WHERE user_id = ?',
+      [userId]
+    );
+
+    // 获取关注者数量
+    const [followersCount] = await pool.execute(
+      'SELECT COUNT(*) as count FROM follows WHERE following_id = ?',
+      [userId]
+    );
 
     res.json({
       profile: {
-        ...profile.toObject(),
-        totalFiles: profile.files.length,
-        totalLikes: profile.files.reduce((sum, file) => sum + file.likes.length, 0)
+        userId: users[0].id,
+        username: users[0].username,
+        email: users[0].email,
+        avatar: users[0].avatar,
+        bio: users[0].bio,
+        location: users[0].location,
+        website: users[0].website,
+        company: users[0].company,
+        position: users[0].position,
+        createdAt: users[0].created_at,
+        totalFiles: filesCount[0].count,
+        totalDownloads: totalDownloads[0].total,
+        followerCount: followersCount[0].count
       }
     });
 
@@ -73,7 +111,7 @@ router.post('/files', authenticateToken, [
       });
     }
 
-    const { title, description, visibility = 'public', tags = [], filename } = req.body;
+    const { title, description, visibility = 'public', tags = [] } = req.body;
     const userId = req.user.id;
 
     if (!req.files || !req.files.length) {
@@ -86,7 +124,8 @@ router.post('/files', authenticateToken, [
     const category = getFileCategory(file.mimetype);
 
     // 创建文件记录
-    const fileRecord = {
+    const fileData = {
+      userId,
       filename: file.filename,
       originalName: file.originalname,
       mimeType: file.mimetype,
@@ -98,23 +137,11 @@ router.post('/files', authenticateToken, [
       visibility
     };
 
-    // 查找或创建用户档案
-    let profile = await Profile.findOne({ userId });
-
-    if (!profile) {
-      profile = new Profile({
-        userId,
-        files: [fileRecord]
-      });
-    } else {
-      profile.files.push(fileRecord);
-    }
-
-    await profile.save();
+    const createdFile = await createFile(fileData);
 
     res.status(201).json({
       message: '文件添加成功',
-      file: profile.files[profile.files.length - 1]
+      file: createdFile
     });
 
   } catch (error) {
@@ -162,29 +189,24 @@ router.put('/files/:fileId', authenticateToken, [
     const userId = req.user.id;
     const updates = req.body;
 
-    const profile = await Profile.findOne({ userId });
+    // 验证文件是否属于当前用户
+    const pool = getMySQLPool();
+    const [files] = await pool.execute(
+      'SELECT id FROM user_files WHERE id = ? AND user_id = ?',
+      [fileId, userId]
+    );
 
-    if (!profile) {
+    if (files.length === 0) {
       return res.status(404).json({
-        error: '档案不存在'
+        error: '文件不存在或不属于当前用户'
       });
     }
 
-    const file = profile.files.id(fileId);
-
-    if (!file) {
-      return res.status(404).json({
-        error: '文件不存在'
-      });
-    }
-
-    // 更新文件信息
-    Object.assign(file, updates);
-    await profile.save();
+    const updatedFile = await updateFile(fileId, updates);
 
     res.json({
       message: '文件更新成功',
-      file
+      file: updatedFile
     });
 
   } catch (error) {
@@ -205,25 +227,13 @@ router.delete('/files/:fileId', authenticateToken, async (req, res) => {
     const { fileId } = req.params;
     const userId = req.user.id;
 
-    const profile = await Profile.findOne({ userId });
+    const success = await deleteFile(fileId, userId);
 
-    if (!profile) {
+    if (!success) {
       return res.status(404).json({
-        error: '档案不存在'
+        error: '文件不存在或不属于当前用户'
       });
     }
-
-    const file = profile.files.id(fileId);
-
-    if (!file) {
-      return res.status(404).json({
-        error: '文件不存在'
-      });
-    }
-
-    // 删除文件记录
-    file.remove();
-    await profile.save();
 
     res.json({
       message: '文件删除成功'
@@ -247,33 +257,33 @@ router.post('/files/:fileId/like', authenticateToken, async (req, res) => {
     const { fileId } = req.params;
     const userId = req.user.id;
 
-    // 获取文件拥有者
-    const [owners] = await getMySQLPool().execute(
-      'SELECT p.userId FROM profiles p JOIN profiles.files f ON f._id = ? WHERE p.userId',
-      [fileId]
-    );
-
-    if (owners.length === 0) {
+    // 获取文件信息
+    const file = await getFileById(fileId);
+    if (!file) {
       return res.status(404).json({
         error: '文件不存在'
       });
     }
 
-    const ownerId = owners[0].userId;
-
-    // 如果是自己点赞
-    if (ownerId === userId) {
+    // 检查是否是自己点赞自己的文件
+    if (file.owner_id === userId) {
       return res.status(400).json({
         error: '不能给自己的文件点赞'
       });
     }
 
-    // TODO: 查找并更新文件
-    // 这里需要根据实际的MongoDB文档结构来操作
+    // 添加点赞
+    const success = await likeFile(userId, fileId);
 
-    res.json({
-      message: '点赞成功'
-    });
+    if (success) {
+      res.json({
+        message: '点赞成功'
+      });
+    } else {
+      res.status(500).json({
+        error: '点赞失败'
+      });
+    }
 
   } catch (error) {
     console.error('点赞错误:', error);

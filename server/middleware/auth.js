@@ -27,7 +27,9 @@ export const authenticateToken = async (req, res, next) => {
 
     if (users.length === 0) {
       return res.status(401).json({
-        error: '用户不存在'
+        code: 1,
+        data: null,
+        msg: '用户不存在'
       });
     }
 
@@ -38,19 +40,25 @@ export const authenticateToken = async (req, res, next) => {
   } catch (error) {
     if (error.name === 'JsonWebTokenError') {
       return res.status(401).json({
-        error: '无效的访问令牌'
+        code: 1,
+        data: null,
+        msg: '无效的访问令牌'
       });
     }
 
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({
-        error: '访问令牌已过期'
+        code: 1,
+        data: null,
+        msg: '访问令牌已过期'
       });
     }
 
     console.error('认证中间件错误:', error);
     res.status(500).json({
-      error: '认证过程中发生错误'
+      code: 1,
+      data: null,
+      msg: '认证过程中发生错误'
     });
   }
 };
@@ -90,7 +98,9 @@ export const checkPermission = (requiredPermission) => {
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({
-        error: '未认证'
+        code: 1,
+        data: null,
+        msg: '未认证'
       });
     }
 
@@ -110,6 +120,28 @@ export const generateToken = (userId) => {
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRE || '7d' }
   );
+};
+
+/**
+ * 生成刷新令牌
+ */
+export const generateRefreshToken = (userId) => {
+  return jwt.sign(
+    { userId, type: 'refresh' },
+    process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET + '_refresh', // 使用不同的密钥或添加后缀
+    { expiresIn: process.env.JWT_REFRESH_EXPIRE || '30d' } // 默认30天
+  );
+};
+
+/**
+ * 验证刷新令牌
+ */
+export const verifyRefreshToken = (token) => {
+  try {
+    return jwt.verify(token, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET + '_refresh');
+  } catch (error) {
+    return null;
+  }
 };
 
 /**

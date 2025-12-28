@@ -44,11 +44,8 @@ async function initDatabase() {
 
     console.log('\n🎉 数据库初始化完成！');
     console.log('\n📋 接下来您需要：');
-    console.log('1. 确保 MongoDB 服务正在运行');
-    console.log('2. 确保 Redis 服务正在运行');
-    console.log('3. 确保 Elasticsearch 服务正在运行');
-    console.log('4. 配置 .env 文件');
-    console.log('5. 运行 npm run dev 启动服务器');
+    console.log('1. 配置 .env 文件');
+    console.log('2. 运行 npm run dev 启动服务器');
 
   } catch (error) {
     console.error('❌ 数据库初始化失败:', error.message);

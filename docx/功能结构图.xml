@@ -1,0 +1,267 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2025-03-28T10:00:00.000Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" etag="h3M7i5E8rHtJq8AqR9kP" version="23.2.4" type="device">
+  <diagram name="功能结构图" id="1t2PswJ3dWx1YhOg8Y2p">
+    <mxGraphModel dx="1328" dy="869" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- 主标题 -->
+        <mxCell id="main-title" value="个人职业资料管理平台功能结构图" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=24;fontColor=#333333;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="220" y="30" width="400" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- 用户认证与授权 -->
+        <mxCell id="auth-module" value="用户认证与授权" style="rounded=1;whiteSpace=wrap;html=1;fontSize=18;align=center;verticalAlign=middle;strokeColor=#0047AB;fillColor=#D9EAD3;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="100" y="100" width="180" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- 认证子功能 -->
+        <mxCell id="auth-sub1" value="用户注册" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#2E75B6;fillColor=#E1F5FE;" vertex="1" parent="1">
+          <mxGeometry x="80" y="180" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="auth-sub2" value="用户登录" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#2E75B6;fillColor=#E1F5FE;" vertex="1" parent="1">
+          <mxGeometry x="180" y="180" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="auth-sub3" value="身份验证" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#2E75B6;fillColor=#E1F5FE;" vertex="1" parent="1">
+          <mxGeometry x="80" y="230" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="auth-sub4" value="令牌管理" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#2E75B6;fillColor=#E1F5FE;" vertex="1" parent="1">
+          <mxGeometry x="180" y="230" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- 个人资料管理 -->
+        <mxCell id="profile-module" value="个人资料管理" style="rounded=1;whiteSpace=wrap;html=1;fontSize=18;align=center;verticalAlign=middle;strokeColor=#990000;fillColor=#F4CCCC;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="320" y="100" width="180" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- 资料子功能 -->
+        <mxCell id="profile-sub1" value="基本信息管理" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#990000;fillColor=#FCE4EC;" vertex="1" parent="1">
+          <mxGeometry x="300" y="180" width="100" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="profile-sub2" value="技能管理" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#990000;fillColor=#FCE4EC;" vertex="1" parent="1">
+          <mxGeometry x="420" y="180" width="100" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="profile-sub3" value="教育背景管理" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#990000;fillColor=#FCE4EC;" vertex="1" parent="1">
+          <mxGeometry x="300" y="230" width="100" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="profile-sub4" value="工作经历管理" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#990000;fillColor=#FCE4EC;" vertex="1" parent="1">
+          <mxGeometry x="420" y="230" width="100" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="profile-sub5" value="社交链接管理" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#990000;fillColor=#FCE4EC;" vertex="1" parent="1">
+          <mxGeometry x="360" y="280" width="100" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- 文件管理 -->
+        <mxCell id="file-module" value="文件管理" style="rounded=1;whiteSpace=wrap;html=1;fontSize=18;align=center;verticalAlign=middle;strokeColor=#38761D;fillColor=#D9EAD3;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="540" y="100" width="180" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- 文件子功能 -->
+        <mxCell id="file-sub1" value="文件上传" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#38761D;fillColor=#F1F8E9;" vertex="1" parent="1">
+          <mxGeometry x="520" y="180" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="file-sub2" value="文件管理" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#38761D;fillColor=#F1F8E9;" vertex="1" parent="1">
+          <mxGeometry x="620" y="180" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="file-sub3" value="文件分享" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#38761D;fillColor=#F1F8E9;" vertex="1" parent="1">
+          <mxGeometry x="520" y="230" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="file-sub4" value="文件统计" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#38761D;fillColor=#F1F8E9;" vertex="1" parent="1">
+          <mxGeometry x="620" y="230" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- 社交互动 -->
+        <mxCell id="social-module" value="社交互动" style="rounded=1;whiteSpace=wrap;html=1;fontSize=18;align=center;verticalAlign=middle;strokeColor=#BF9000;fillColor=#FFF2CC;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="100" y="350" width="180" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- 社交子功能 -->
+        <mxCell id="social-sub1" value="关注系统" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#BF9000;fillColor=#FFE599;" vertex="1" parent="1">
+          <mxGeometry x="80" y="430" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="social-sub2" value="点赞系统" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#BF9000;fillColor=#FFE599;" vertex="1" parent="1">
+          <mxGeometry x="180" y="430" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="social-sub3" value="评论系统" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#BF9000;fillColor=#FFE599;" vertex="1" parent="1">
+          <mxGeometry x="80" y="480" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="social-sub4" value="实时通知" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#BF9000;fillColor=#FFE599;" vertex="1" parent="1">
+          <mxGeometry x="180" y="480" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- 搜索与发现 -->
+        <mxCell id="search-module" value="搜索与发现" style="rounded=1;whiteSpace=wrap;html=1;fontSize=18;align=center;verticalAlign=middle;strokeColor=#674EA7;fillColor=#E4D7F2;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="320" y="350" width="180" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- 搜索子功能 -->
+        <mxCell id="search-sub1" value="用户搜索" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#674EA7;fillColor=#EBDEF0;" vertex="1" parent="1">
+          <mxGeometry x="300" y="430" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="search-sub2" value="文件搜索" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#674EA7;fillColor=#EBDEF0;" vertex="1" parent="1">
+          <mxGeometry x="400" y="430" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="search-sub3" value="推荐系统" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#674EA7;fillColor=#EBDEF0;" vertex="1" parent="1">
+          <mxGeometry x="350" y="480" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- 通知与消息 -->
+        <mxCell id="notification-module" value="通知与消息" style="rounded=1;whiteSpace=wrap;html=1;fontSize=18;align=center;verticalAlign=middle;strokeColor=#A64D79;fillColor=#F4CCCC;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="540" y="350" width="180" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- 通知子功能 -->
+        <mxCell id="notification-sub1" value="系统通知" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#A64D79;fillColor=#F2D7D5;" vertex="1" parent="1">
+          <mxGeometry x="520" y="430" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="notification-sub2" value="消息推送" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#A64D79;fillColor=#F2D7D5;" vertex="1" parent="1">
+          <mxGeometry x="620" y="430" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="notification-sub3" value="通知管理" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#A64D79;fillColor=#F2D7D5;" vertex="1" parent="1">
+          <mxGeometry x="570" y="480" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- 系统管理 -->
+        <mxCell id="system-module" value="系统管理" style="rounded=1;whiteSpace=wrap;html=1;fontSize=18;align=center;verticalAlign=middle;strokeColor=#666666;fillColor=#EAEAEA;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="220" y="600" width="180" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- 系统子功能 -->
+        <mxCell id="system-sub1" value="隐私设置" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#666666;fillColor=#F3F3F3;" vertex="1" parent="1">
+          <mxGeometry x="200" y="680" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="system-sub2" value="安全设置" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#666666;fillColor=#F3F3F3;" vertex="1" parent="1">
+          <mxGeometry x="300" y="680" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="system-sub3" value="系统配置" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#666666;fillColor=#F3F3F3;" vertex="1" parent="1">
+          <mxGeometry x="250" y="730" width="80" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- 连接线：主模块到子功能 -->
+        <mxCell id="conn1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="auth-module" target="auth-sub1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="auth-module" target="auth-sub2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="auth-module" target="auth-sub3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="auth-module" target="auth-sub4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="profile-module" target="profile-sub1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="profile-module" target="profile-sub2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="profile-module" target="profile-sub3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="profile-module" target="profile-sub4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn9" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="profile-module" target="profile-sub5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn10" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="file-module" target="file-sub1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn11" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="file-module" target="file-sub2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn12" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="file-module" target="file-sub3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn13" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="file-module" target="file-sub4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn14" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="social-module" target="social-sub1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn15" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="social-module" target="social-sub2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn16" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="social-module" target="social-sub3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn17" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="social-module" target="social-sub4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn18" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="search-module" target="search-sub1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn19" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="search-module" target="search-sub2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn20" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="search-module" target="search-sub3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn21" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="notification-module" target="notification-sub1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn22" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="notification-module" target="notification-sub2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn23" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="notification-module" target="notification-sub3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn24" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="system-module" target="system-sub1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn25" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="system-module" target="system-sub2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn26" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#999999;strokeWidth=1;" edge="1" parent="1" source="system-module" target="system-sub3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

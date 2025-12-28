@@ -13,9 +13,6 @@ import { createServer } from 'http';
 import app from './app.js';
 import {
   initMySQL,
-  initMongoDB,
-  initRedis,
-  initElasticsearch,
   closeConnections
 } from './config/database.js';
 import { initSocket } from './socket/handler.js';
@@ -35,14 +32,7 @@ const initialize = async () => {
     console.log('  → 正在连接MySQL...');
     await initMySQL();
     console.log('  → MySQL连接完成');
-    console.log('  → 正在连接MongoDB...');
-    await initMongoDB();
-    console.log('  → MongoDB连接完成');
-    console.log('  → 正在连接Redis...');
-    const redisClient = await initRedis();
-    console.log('  → Redis连接完成');
-
-    // 初始化搜索引擎（可选）
+    // 初始化搜索引擎
     console.log('🔍 初始化搜索引擎...');
     try {
       const searchReady = await initSearchEngine();
@@ -73,10 +63,7 @@ const initialize = async () => {
   } catch (error) {
     console.error('\n❌ 服务器启动失败:', error.message);
     console.log('\n请检查以下服务是否正常运行:');
-    console.log('1. MySQL数据库');
-    console.log('2. MongoDB数据库');
-    console.log('3. Redis缓存');
-    console.log('4. Elasticsearch (可选)\n');
+    console.log('1. MySQL数据库\n');
     process.exit(1);
   }
 };

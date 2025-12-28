@@ -1,7 +1,7 @@
 import express from 'express';
 import { body, validationResult } from 'express-validator';
-import Notification from '../models/Notification.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { getMySQLPool } from '../config/database.js';
 
 const router = express.Router();
 
@@ -12,40 +12,67 @@ const router = express.Router();
  */
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const { page = 1, limit = 20, unreadOnly = false } = req.query;
     const userId = req.user.id;
+    const pool = getMySQLPool();
 
-    const query = { userId };
-    if (unreadOnly === 'true' || unreadOnly === true) {
-      query.isRead = false;
+    // 确保分页参数是有效的整数
+    const pageNum = Math.max(1, parseInt(req.query.page) || 1);
+    const limitNum = Math.max(1, Math.min(100, parseInt(req.query.limit) || 20));
+    const offset = (pageNum - 1) * limitNum;
+    const unreadOnly = req.query.unreadOnly === 'true' || req.query.unreadOnly === true;
+
+    let sql, countSql, queryParams, countParams;
+
+    if (unreadOnly) {
+      // 只查询未读通知
+      sql = 'SELECT * FROM notifications WHERE user_id = ? AND is_read = 0 ORDER BY created_at DESC LIMIT ? OFFSET ?';
+      queryParams = [userId, limitNum, offset];
+
+      countSql = 'SELECT COUNT(*) as total FROM notifications WHERE user_id = ? AND is_read = 0';
+      countParams = [userId];
+    } else {
+      // 查询所有通知
+      sql = 'SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?';
+      queryParams = [userId, limitNum, offset];
+
+      countSql = 'SELECT COUNT(*) as total FROM notifications WHERE user_id = ?';
+      countParams = [userId];
     }
 
-    const notifications = await Notification.find(query)
-      .sort({ createdAt: -1 })
-      .skip((parseInt(page) - 1) * parseInt(limit))
-      .limit(parseInt(limit))
-      .lean();
+    // 获取通知列表
+    const [notifications] = await pool.query(sql, queryParams);
 
-    const total = await Notification.countDocuments(query);
-    const unreadCount = await Notification.countDocuments({
-      userId,
-      isRead: false
-    });
+    // 获取总数
+    const [totalResult] = await pool.query(countSql, countParams);
+    const total = totalResult[0].total;
+
+    // 获取未读数量
+    const [unreadResult] = await pool.query(
+      'SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND is_read = 0',
+      [userId]
+    );
+    const unreadCount = unreadResult[0].count;
 
     res.json({
-      notifications,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total
+      code: 0,
+      data: {
+        notifications,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total
+        },
+        unreadCount
       },
-      unreadCount
+      msg: "获取成功"
     });
 
   } catch (error) {
     console.error('获取通知列表错误:', error);
     res.status(500).json({
-      error: '获取通知列表失败'
+      code: 500,
+      data: null,
+      msg: '获取通知列表失败'
     });
   }
 });
@@ -69,43 +96,57 @@ router.post('/mark-read', authenticateToken, [
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({
-        error: '输入数据验证失败',
-        details: errors.array()
+        code: 400,
+        data: {
+          details: errors.array()
+        },
+        msg: '输入数据验证失败'
       });
     }
 
     const { notificationIds, markAll = false } = req.body;
     const userId = req.user.id;
+    const pool = getMySQLPool();
 
     if (markAll) {
       // 标记所有通知为已读
-      await Notification.updateMany(
-        { userId, isRead: false },
-        { isRead: true, readAt: new Date() }
+      await pool.execute(
+        `UPDATE notifications
+         SET is_read = 1, read_at = CURRENT_TIMESTAMP
+         WHERE user_id = ? AND is_read = 0`,
+        [userId]
       );
     } else if (notificationIds && notificationIds.length > 0) {
       // 标记指定通知为已读
-      await Notification.updateMany(
-        {
-          _id: { $in: notificationIds },
-          userId
-        },
-        { isRead: true, readAt: new Date() }
+      const placeholders = notificationIds.map(() => '?').join(',');
+      const params = [...notificationIds, userId];
+
+      await pool.execute(
+        `UPDATE notifications
+         SET is_read = 1, read_at = CURRENT_TIMESTAMP
+         WHERE id IN (${placeholders}) AND user_id = ?`,
+        params
       );
     } else {
       return res.status(400).json({
-        error: '请提供要标记的通知ID或选择标记全部'
+        code: 400,
+        data: null,
+        msg: '请提供要标记的通知ID或选择标记全部'
       });
     }
 
     res.json({
-      message: '标记成功'
+      code: 0,
+      data: {},
+      msg: '标记成功'
     });
 
   } catch (error) {
     console.error('标记通知已读错误:', error);
     res.status(500).json({
-      error: '标记失败'
+      code: 500,
+      data: null,
+      msg: '标记失败'
     });
   }
 });
@@ -120,25 +161,33 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
 
-    const result = await Notification.deleteOne({
-      _id: id,
-      userId
-    });
+    const pool = getMySQLPool();
 
-    if (result.deletedCount === 0) {
+    const [result] = await pool.execute(
+      'DELETE FROM notifications WHERE id = ? AND user_id = ?',
+      [id, userId]
+    );
+
+    if (result.affectedRows === 0) {
       return res.status(404).json({
-        error: '通知不存在'
+        code: 404,
+        data: null,
+        msg: '通知不存在'
       });
     }
 
     res.json({
-      message: '通知删除成功'
+      code: 0,
+      data: {},
+      msg: '通知删除成功'
     });
 
   } catch (error) {
     console.error('删除通知错误:', error);
     res.status(500).json({
-      error: '删除通知失败'
+      code: 500,
+      data: null,
+      msg: '删除通知失败'
     });
   }
 });
@@ -152,17 +201,28 @@ router.get('/unread-count', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const count = await Notification.countDocuments({
-      userId,
-      isRead: false
-    });
+    const pool = getMySQLPool();
 
-    res.json({ count });
+    const [result] = await pool.execute(
+      'SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND is_read = 0',
+      [userId]
+    );
+    const count = result[0].count;
+
+    res.json({
+      code: 0,
+      data: {
+        count
+      },
+      msg: '获取成功'
+    });
 
   } catch (error) {
     console.error('获取未读通知数量错误:', error);
     res.status(500).json({
-      error: '获取未读通知数量失败'
+      code: 500,
+      data: null,
+      msg: '获取未读通知数量失败'
     });
   }
 });

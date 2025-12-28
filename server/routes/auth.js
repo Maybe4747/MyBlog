@@ -2,8 +2,8 @@ import express from 'express';
 import bcrypt from 'bcrypt';
 import { body, validationResult } from 'express-validator';
 import { getMySQLPool } from '../config/database.js';
-import User from '../models/User.js';
-import { generateToken, authenticateToken } from '../middleware/auth.js';
+import { generateToken, generateRefreshToken, authenticateToken, verifyRefreshToken } from '../middleware/auth.js';
+import { createUserProfile, getUserByUsername } from '../services/userService.js';
 
 const router = express.Router();
 
@@ -63,19 +63,25 @@ router.post('/register', [
     try {
       // 在MySQL中创建用户
       const [userResult] = await connection.execute(
-        'INSERT INTO users (username, email, passwordHash, createdAt, updatedAt) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)',
+        'INSERT INTO users (username, email, password, created_at, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)',
         [username, email, hashedPassword]
       );
 
       const userId = userResult.insertId;
 
-      // 在MongoDB中创建用户档案
-      await User.create({
-        userId,
-        username,
-        email,
-        password: hashedPassword
-      });
+      // 在MySQL中创建用户档案
+      await createUserProfile(userId, {
+        bio: '',
+        location: '',
+        website: '',
+        company: '',
+        position: '',
+        skills: [],
+        socialLinks: {},
+        profileVisibility: 'public',
+        showEmail: false,
+        showActivity: true
+      }, connection);
 
       await connection.commit();
 
@@ -113,7 +119,7 @@ router.post('/register', [
  * @access  Public
  */
 router.post('/login', [
-  body('loginId')
+  body('email')
     .notEmpty()
     .withMessage('请提供用户名或邮箱'),
   body('password')
@@ -129,18 +135,20 @@ router.post('/login', [
       });
     }
 
-    const { loginId, password } = req.body;
+    const { email, password } = req.body;
     const pool = getMySQLPool();
 
     // 查找用户（支持用户名或邮箱登录）
     const [users] = await pool.execute(
       'SELECT id, username, email, passwordHash FROM users WHERE username = ? OR email = ?',
-      [loginId, loginId]
+      [email, email]
     );
 
     if (users.length === 0) {
       return res.status(401).json({
-        error: '用户名或密码错误'
+        code: 1,
+        data: null,
+        msg: '用户名或密码错误'
       });
     }
 
@@ -150,33 +158,42 @@ router.post('/login', [
     const isValidPassword = await bcrypt.compare(password, user.passwordHash);
     if (!isValidPassword) {
       return res.status(401).json({
-        error: '用户名或密码错误'
+        code: 1,
+        data: null,
+        msg: '用户名或密码错误'
       });
     }
 
     // 更新最后登录时间
     await pool.execute(
-      'UPDATE users SET lastLoginAt = CURRENT_TIMESTAMP WHERE id = ?',
+      'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?',
       [user.id]
     );
 
-    // 生成JWT令牌
+    // 生成JWT令牌和刷新令牌
     const token = generateToken(user.id);
+    const refreshToken = generateRefreshToken(user.id);
 
     res.json({
-      message: '登录成功',
-      token,
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email
-      }
+      code: 0,
+      data: {
+        token,
+        refreshToken,
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email
+        }
+      },
+      msg: '登录成功'
     });
 
   } catch (error) {
     console.error('登录错误:', error);
     res.status(500).json({
-      error: '登录失败，请稍后重试'
+      code: 1,
+      data: null,
+      msg: '登录失败，请稍后重试'
     });
   }
 });
@@ -188,63 +205,118 @@ router.post('/login', [
  */
 router.get('/me', authenticateToken, async (req, res) => {
   try {
-    const user = await User.findOne({ userId: req.user.id });
+    const user = await getUserByUsername(req.user.username);
 
     if (!user) {
       return res.status(404).json({
-        error: '用户不存在'
+        code: 1,
+        data: null,
+        msg: '用户不存在'
       });
     }
 
     res.json({
-      user: {
-        id: user.userId,
-        username: user.username,
-        email: user.email,
-        avatar: user.avatar,
-        bio: user.bio,
-        location: user.location,
-        website: user.website,
-        skills: user.skills,
-        experience: user.experience,
-        education: user.education,
-        socialLinks: user.socialLinks,
-        privacySettings: user.privacySettings
-      }
+      code: 0,
+      data: {
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          avatar: user.avatar,
+          bio: user.bio,
+          location: user.location,
+          website: user.website,
+          skills: user.skills,
+          socialLinks: user.socialLinks,
+          privacySettings: {
+            profileVisibility: user.privacySettings?.profile_visibility || 'public',
+            showEmail: user.privacySettings?.show_email || false,
+            showActivity: user.privacySettings?.show_activity || true
+          }
+        }
+      },
+      msg: '获取成功'
     });
 
   } catch (error) {
     console.error('获取用户信息错误:', error);
     res.status(500).json({
-      error: '获取用户信息失败'
+      code: 1,
+      data: null,
+      msg: '获取用户信息失败'
     });
   }
 });
 
 /**
  * @route   POST /api/auth/refresh
- * @desc    刷新访问令牌
- * @access  Private
+ * @desc    使用刷新令牌获取新的访问令牌
+ * @access  Public (但需要有效的刷新令牌)
  */
-router.post('/refresh', authenticateToken, async (req, res) => {
+router.post('/refresh', async (req, res) => {
   try {
-    // 生成新的令牌
-    const token = generateToken(req.user.id);
+    const refreshToken = req.body.refreshToken || req.query.refreshToken;
+
+    if (!refreshToken) {
+      return res.status(401).json({
+        code: 1,
+        data: null,
+        msg: '未提供刷新令牌'
+      });
+    }
+
+    // 验证刷新令牌
+    const decoded = verifyRefreshToken(refreshToken);
+    if (!decoded) {
+      return res.status(401).json({
+        code: 1,
+        data: null,
+        msg: '无效的刷新令牌'
+      });
+    }
+
+    // 生成新的访问令牌
+    const newToken = generateToken(decoded.userId);
+
+    // 生成新的刷新令牌
+    const newRefreshToken = generateRefreshToken(decoded.userId);
+
+    // 查询用户信息
+    const pool = getMySQLPool();
+    const [users] = await pool.execute(
+      'SELECT id, username, email, avatar FROM users WHERE id = ?',
+      [decoded.userId]
+    );
+
+    if (users.length === 0) {
+      return res.status(401).json({
+        code: 1,
+        data: null,
+        msg: '用户不存在'
+      });
+    }
 
     res.json({
-      token,
-      user: {
-        id: req.user.id,
-        username: req.user.username,
-        email: req.user.email,
-        avatar: req.user.avatar
-      }
+      code: 0,
+      data: {
+        token: newToken,
+        refreshToken: newRefreshToken,
+        user: {
+          id: users[0].id,
+          username: users[0].username,
+          email: users[0].email,
+          avatar: users[0].avatar
+        }
+      },
+      msg: '令牌刷新成功'
     });
 
   } catch (error) {
     console.error('刷新令牌错误:', error);
     res.status(500).json({
-      error: '刷新令牌失败'
+      code: 1,
+      data: null,
+      msg: '刷新令牌失败'
     });
   }
 });

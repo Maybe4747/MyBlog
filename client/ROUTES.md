@@ -5,7 +5,7 @@
 ### 认证页面（无需登录）
 - **登录页面**: `/login`
   - 组件: `pages/login/index.jsx`
-  - 描述: 用户登录页面，采用玻璃态设计风格
+  - 描述: 用户登录页面，采用清新玻璃态设计风格
 
 - **注册页面**: `/register`
   - 组件: `pages/register/index.jsx`
@@ -81,20 +81,20 @@
 所有页面遵循统一的设计系统：
 
 ### 视觉特征
-- **背景**: 深紫色渐变 (`from-slate-900 via-purple-900 to-slate-900`)
-- **玻璃态效果**: `backdrop-blur-xl` + 半透明白色
-- **边框**: `border-white/10` 到 `border-white/20`
+- **背景**: 清新渐变背景 (`from-blue-50 via-indigo-50 to-purple-50`)
+- **玻璃态效果**: `backdrop-blur-lg` + 半透明白色
+- **边框**: `border-white/20`
 - **动画**: 浮动装饰球、模糊背景、缩放效果
 
 ### 文字和图标
-- **标题**: 渐变色文字 (`from-cyan-400 via-purple-400 to-pink-400`)
-- **正文**: 白色透明度 (`text-white/70`, `text-white/80`)
-- **图标**: SVG格式，不同颜色代表不同类型
+- **标题**: 清爽字体，深灰色调
+- **正文**: 中等灰度文字 (`text-gray-600`, `text-gray-700`)
+- **图标**: SVG格式，现代扁平化设计
 
 ### 交互元素
-- **按钮**: 渐变色 (`from-purple-600 to-pink-600`)
+- **按钮**: 渐变色 (`from-blue-500 to-purple-600`, `from-green-500 to-teal-600`)
 - **卡片**: 玻璃态背景，悬停时增强效果
-- **输入框**: 半透明背景，聚焦时紫色边框
+- **输入框**: 半透明背景，聚焦时蓝色边框
 
 ## 文件结构
 
@@ -105,6 +105,8 @@ client/src/
 │   ├── Navbar.jsx             # 全局导航栏
 │   ├── FileCard.jsx           # 文件卡片组件
 │   └── FileUpload.jsx         # 文件上传组件
+├── contexts/
+│   └── AuthContext.jsx        # 认证上下文
 ├── pages/
 │   ├── login/
 │   │   └── index.jsx          # 登录页

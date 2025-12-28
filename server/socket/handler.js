@@ -1,7 +1,6 @@
 import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
-import User from '../models/User.js';
-import Notification from '../models/Notification.js';
+import { getMySQLPool } from '../config/database.js';
 
 let io;
 
@@ -29,14 +28,20 @@ export const initSocket = (server) => {
       }
 
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await User.findOne({ userId: decoded.userId });
 
-      if (!user) {
+      // 从MySQL获取用户信息
+      const pool = getMySQLPool();
+      const [users] = await pool.execute(
+        'SELECT id, username FROM users WHERE id = ?',
+        [decoded.userId]
+      );
+
+      if (users.length === 0) {
         return next(new Error('用户不存在'));
       }
 
       socket.userId = decoded.userId;
-      socket.username = user.username;
+      socket.username = users[0].username;
       next();
 
     } catch (error) {
@@ -64,21 +69,42 @@ export const initSocket = (server) => {
       try {
         const { targetUserId, targetType, targetId } = data;
 
+        const pool = getMySQLPool();
+
         // 创建通知
-        const notification = await Notification.create({
-          userId: targetUserId,
-          type: 'like',
-          title: '新的点赞',
-          content: `${socket.username} 点赞了您的${getTypeName(targetType)}`,
-          fromUserId: socket.userId,
-          fromUsername: socket.username,
-          relatedType: targetType,
-          relatedId: targetId
-        });
+        const [result] = await pool.execute(
+          `INSERT INTO notifications (user_id, type, title, content, from_user_id, from_username, related_type, related_id, is_read)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            targetUserId,
+            'like',
+            '新的点赞',
+            `${socket.username} 点赞了您的${getTypeName(targetType)}`,
+            socket.userId,
+            socket.username,
+            targetType,
+            targetId,
+            0
+          ]
+        );
+
+        const notificationId = result.insertId;
 
         // 发送给目标用户
         io.to(`user:${targetUserId}`).emit('notification', {
-          notification
+          notification: {
+            id: notificationId,
+            userId: targetUserId,
+            type: 'like',
+            title: '新的点赞',
+            content: `${socket.username} 点赞了您的${getTypeName(targetType)}`,
+            fromUserId: socket.userId,
+            fromUsername: socket.username,
+            relatedType: targetType,
+            relatedId: targetId,
+            isRead: 0,
+            createdAt: new Date()
+          }
         });
 
       } catch (error) {
@@ -91,26 +117,38 @@ export const initSocket = (server) => {
       try {
         const { targetUserId } = data;
 
-        const [users] = await getMySQLPool().execute(
-          'SELECT username FROM users WHERE id = ?',
-          [targetUserId]
-        );
-
-        if (users.length === 0) return;
+        const pool = getMySQLPool();
 
         // 创建通知
-        const notification = await Notification.create({
-          userId: targetUserId,
-          type: 'follow',
-          title: '新的关注者',
-          content: `${socket.username} 关注了您`,
-          fromUserId: socket.userId,
-          fromUsername: socket.username
-        });
+        const [result] = await pool.execute(
+          `INSERT INTO notifications (user_id, type, title, content, from_user_id, from_username, is_read)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            targetUserId,
+            'follow',
+            '新的关注者',
+            `${socket.username} 关注了您`,
+            socket.userId,
+            socket.username,
+            0
+          ]
+        );
+
+        const notificationId = result.insertId;
 
         // 发送给目标用户
         io.to(`user:${targetUserId}`).emit('notification', {
-          notification
+          notification: {
+            id: notificationId,
+            userId: targetUserId,
+            type: 'follow',
+            title: '新的关注者',
+            content: `${socket.username} 关注了您`,
+            fromUserId: socket.userId,
+            fromUsername: socket.username,
+            isRead: 0,
+            createdAt: new Date()
+          }
         });
 
       } catch (error) {
@@ -123,21 +161,42 @@ export const initSocket = (server) => {
       try {
         const { targetUserId, targetType, targetId, content } = data;
 
+        const pool = getMySQLPool();
+
         // 创建通知
-        const notification = await Notification.create({
-          userId: targetUserId,
-          type: 'comment',
-          title: '新的评论',
-          content: `${socket.username} 评论了您的${getTypeName(targetType)}: "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}"`,
-          fromUserId: socket.userId,
-          fromUsername: socket.username,
-          relatedType: targetType,
-          relatedId: targetId
-        });
+        const [result] = await pool.execute(
+          `INSERT INTO notifications (user_id, type, title, content, from_user_id, from_username, related_type, related_id, is_read)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            targetUserId,
+            'comment',
+            '新的评论',
+            `${socket.username} 评论了您的${getTypeName(targetType)}: "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}"`,
+            socket.userId,
+            socket.username,
+            targetType,
+            targetId,
+            0
+          ]
+        );
+
+        const notificationId = result.insertId;
 
         // 发送给目标用户
         io.to(`user:${targetUserId}`).emit('notification', {
-          notification
+          notification: {
+            id: notificationId,
+            userId: targetUserId,
+            type: 'comment',
+            title: '新的评论',
+            content: `${socket.username} 评论了您的${getTypeName(targetType)}: "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}"`,
+            fromUserId: socket.userId,
+            fromUsername: socket.username,
+            relatedType: targetType,
+            relatedId: targetId,
+            isRead: 0,
+            createdAt: new Date()
+          }
         });
 
       } catch (error) {
@@ -150,21 +209,42 @@ export const initSocket = (server) => {
       try {
         const { mentionedUserId, targetType, targetId, content } = data;
 
+        const pool = getMySQLPool();
+
         // 创建通知
-        const notification = await Notification.create({
-          userId: mentionedUserId,
-          type: 'mention',
-          title: '新的@提及',
-          content: `${socket.username} 在${getTypeName(targetType)}中提到了您: "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}"`,
-          fromUserId: socket.userId,
-          fromUsername: socket.username,
-          relatedType: targetType,
-          relatedId: targetId
-        });
+        const [result] = await pool.execute(
+          `INSERT INTO notifications (user_id, type, title, content, from_user_id, from_username, related_type, related_id, is_read)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            mentionedUserId,
+            'mention',
+            '新的@提及',
+            `${socket.username} 在${getTypeName(targetType)}中提到了您: "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}"`,
+            socket.userId,
+            socket.username,
+            targetType,
+            targetId,
+            0
+          ]
+        );
+
+        const notificationId = result.insertId;
 
         // 发送给被提及用户
         io.to(`user:${mentionedUserId}`).emit('notification', {
-          notification
+          notification: {
+            id: notificationId,
+            userId: mentionedUserId,
+            type: 'mention',
+            title: '新的@提及',
+            content: `${socket.username} 在${getTypeName(targetType)}中提到了您: "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}"`,
+            fromUserId: socket.userId,
+            fromUsername: socket.username,
+            relatedType: targetType,
+            relatedId: targetId,
+            isRead: 0,
+            createdAt: new Date()
+          }
         });
 
       } catch (error) {
@@ -215,5 +295,3 @@ const getTypeName = (type) => {
   };
   return typeMap[type] || '内容';
 };
-
-import { getMySQLPool } from '../config/database.js';

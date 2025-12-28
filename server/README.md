@@ -8,9 +8,7 @@
 
 - **运行时**: Node.js
 - **框架**: Express.js
-- **数据库**: MySQL + MongoDB混合存储
-- **缓存**: Redis
-- **搜索引擎**: Elasticsearch
+- **数据库**: MySQL存储
 - **实时通信**: Socket.IO
 - **认证**: JWT + bcrypt
 - **文件上传**: Multer
@@ -32,14 +30,12 @@
 
 ### 🤝 社交互动
 - 关注/取消关注用户
-- 点赞/取消点赞
-- 评论功能
+- 点赞/取消点赞（仅支持对留言点赞）
+- 留言板功能（在他人主页发表留言）
 - @提及功能
 - WebSocket实时通信
 
 ### 🔍 搜索功能
-- Elasticsearch全文检索
-- Redis缓存优化
 - 用户搜索
 - 文件搜索
 - 搜索建议
@@ -61,17 +57,17 @@ server/
 │   └── init.js
 ├── middleware/         # 中间件
 │   └── auth.js
-├── models/             # MongoDB数据模型
-│   ├── User.js
-│   ├── Profile.js
-│   ├── Follow.js
-│   └── Notification.js
+├── services/           # 数据服务层
+│   ├── userService.js
+│   ├── fileService.js
+│   └── socialService.js
 ├── routes/             # 路由模块
 │   ├── auth.js         # 认证路由
 │   ├── users.js        # 用户路由
 │   ├── profiles.js     # 档案路由
 │   ├── files.js        # 文件路由
 │   ├── social.js       # 社交路由
+│   ├── messages.js     # 留言路由
 │   ├── search.js       # 搜索路由
 │   ├── notifications.js # 通知路由
 │   └── index.js        # 路由入口
@@ -114,14 +110,7 @@ MYSQL_USER=root
 MYSQL_PASSWORD=your_password
 MYSQL_DATABASE=career_platform
 
-MONGO_URI=mongodb://localhost:27017/career_platform
 
-# Redis配置
-REDIS_HOST=localhost
-REDIS_PORT=6379
-
-# Elasticsearch配置
-ELASTICSEARCH_NODE=http://localhost:9200
 
 # JWT配置
 JWT_SECRET=your_super_secret_key_change_in_production
@@ -133,9 +122,6 @@ JWT_EXPIRE=7d
 确保以下服务已安装并正在运行：
 
 - **MySQL** (推荐版本 8.0+)
-- **MongoDB** (推荐版本 6.0+)
-- **Redis** (推荐版本 7.0+)
-- **Elasticsearch** (推荐版本 8.0+) - 可选
 
 #### MySQL安装
 
@@ -149,35 +135,6 @@ brew install mysql
 brew services start mysql
 ```
 
-#### MongoDB安装
-
-Windows/macOS:
-- 下载MongoDB Community Server: https://www.mongodb.com/try/download/community
-- 安装并启动MongoDB服务
-
-#### Redis安装
-
-Windows:
-- 下载Redis: https://github.com/microsoftarchive/redis/releases
-- 或使用WSL
-
-macOS:
-```bash
-brew install redis
-brew services start redis
-```
-
-#### Elasticsearch安装
-
-Docker (推荐):
-```bash
-docker run -d \
-  --name elasticsearch \
-  -p 9200:9200 \
-  -e "discovery.type=single-node" \
-  -e "xpack.security.enabled=false" \
-  elasticsearch:8.11.0
-```
 
 ### 4. 初始化数据库
 
@@ -356,10 +313,8 @@ router.post('/route', [
 ## 常见问题
 
 ### Q: 启动时提示数据库连接失败
-A: 请确保MySQL、MongoDB和Redis服务正在运行，并且.env配置文件中的连接信息正确。
+A: 请确保MySQL服务正在运行，并且.env配置文件中的连接信息正确。
 
-### Q: Elasticsearch连接失败
-A: Elasticsearch是可选服务。如果未安装或未启动，搜索功能将自动降级到MongoDB查询。
 
 ### Q: 文件上传失败
 A: 请检查uploads目录是否有写入权限，以及文件大小是否超过配置限制。

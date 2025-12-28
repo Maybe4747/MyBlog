@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2025-03-28T09:30:00.000Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" etag="drk7gV_fKHHFFy6C4vGq" version="23.2.4" type="device">
+  <diagram name="系统架构图" id="9jMLhYF8lx1wzvR9R0eB">
+    <mxGraphModel dx="1328" dy="869" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- 前端UI层 -->
+        <mxCell id="frontend-layer" value="前端 UI 层" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fontSize=20;fontColor=#0047AB;strokeColor=#0047AB;" vertex="1" parent="1">
+          <mxGeometry x="80" y="60" width="660" height="360" as="geometry" />
+        </mxCell>
+        
+        <!-- 前端模块 -->
+        <mxCell id="frontend-modules" value="" style="group;strokeWidth=1;" vertex="1" connectable="0" parent="frontend-layer">
+          <mxGeometry x="20" y="40" width="620" height="300" as="geometry" />
+        </mxCell>
+        
+        <!-- 用户注册/登录 -->
+        <mxCell id="auth-module" value="用户注册/登录" style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;align=center;verticalAlign=middle;strokeColor=#2E75B6;fillColor=#D9EAD3;gradientColor=none;" vertex="1" parent="frontend-modules">
+          <mxGeometry x="30" y="20" width="160" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- 个人资料管理 -->
+        <mxCell id="profile-module" value="个人资料管理" style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;align=center;verticalAlign=middle;strokeColor=#2E75B6;fillColor=#D9EAD3;gradientColor=none;" vertex="1" parent="frontend-modules">
+          <mxGeometry x="230" y="20" width="160" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- 文件上传/管理 -->
+        <mxCell id="file-module" value="文件上传/管理" style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;align=center;verticalAlign=middle;strokeColor=#2E75B6;fillColor=#D9EAD3;gradientColor=none;" vertex="1" parent="frontend-modules">
+          <mxGeometry x="430" y="20" width="160" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- 技能/经历维护 -->
+        <mxCell id="skill-module" value="技能/经历维护" style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;align=center;verticalAlign=middle;strokeColor=#2E75B6;fillColor=#D9EAD3;gradientColor=none;" vertex="1" parent="frontend-modules">
+          <mxGeometry x="30" y="130" width="160" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- 社交互动模块 -->
+        <mxCell id="social-module" value="社交互动模块" style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;align=center;verticalAlign=middle;strokeColor=#2E75B6;fillColor=#D9EAD3;gradientColor=none;" vertex="1" parent="frontend-modules">
+          <mxGeometry x="230" y="130" width="160" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- 通知中心模块 -->
+        <mxCell id="notification-module" value="通知中心模块" style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;align=center;verticalAlign=middle;strokeColor=#2E75B6;fillColor=#D9EAD3;gradientColor=none;" vertex="1" parent="frontend-modules">
+          <mxGeometry x="430" y="130" width="160" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- 前端技术栈标签 -->
+        <mxCell id="frontend-tech" value="技术栈：Vue.js + Element-UI + Axios + Vue Router + Pinia" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=14;fontColor=#666666;" vertex="1" parent="frontend-modules">
+          <mxGeometry x="30" y="230" width="560" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- 后端业务处理层 -->
+        <mxCell id="backend-layer" value="后端业务处理层" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fontSize=20;fontColor=#990000;strokeColor=#990000;" vertex="1" parent="1">
+          <mxGeometry x="80" y="460" width="660" height="320" as="geometry" />
+        </mxCell>
+        
+        <!-- Express服务器 -->
+        <mxCell id="express-server" value="Express 服务器" style="rounded=0;whiteSpace=wrap;html=1;fontSize=18;align=center;verticalAlign=middle;strokeColor=#990000;fillColor=#F4CCCC;gradientColor=none;strokeWidth=2;" vertex="1" parent="backend-layer">
+          <mxGeometry x="80" y="40" width="500" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- 后端模块组 -->
+        <mxCell id="backend-modules" value="" style="group;strokeWidth=1;" vertex="1" connectable="0" parent="backend-layer">
+          <mxGeometry x="80" y="120" width="500" height="150" as="geometry" />
+        </mxCell>
+        
+        <!-- 认证模块 -->
+        <mxCell id="backend-auth" value="认证模块" style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;align=center;verticalAlign=middle;strokeColor=#990000;fillColor=#F4CCCC;gradientColor=none;" vertex="1" parent="backend-modules">
+          <mxGeometry x="0" y="0" width="90" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- 用户管理模块 -->
+        <mxCell id="backend-user" value="用户管理模块" style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;align=center;verticalAlign=middle;strokeColor=#990000;fillColor=#F4CCCC;gradientColor=none;" vertex="1" parent="backend-modules">
+          <mxGeometry x="105" y="0" width="90" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- 文件处理模块 -->
+        <mxCell id="backend-file" value="文件处理模块" style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;align=center;verticalAlign=middle;strokeColor=#990000;fillColor=#F4CCCC;gradientColor=none;" vertex="1" parent="backend-modules">
+          <mxGeometry x="210" y="0" width="90" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- 社交互动模块 -->
+        <mxCell id="backend-social" value="社交互动模块" style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;align=center;verticalAlign=middle;strokeColor=#990000;fillColor=#F4CCCC;gradientColor=none;" vertex="1" parent="backend-modules">
+          <mxGeometry x="315" y="0" width="90" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- 通知推送模块 -->
+        <mxCell id="backend-notify" value="通知推送模块" style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;align=center;verticalAlign=middle;strokeColor=#990000;fillColor=#F4CCCC;gradientColor=none;" vertex="1" parent="backend-modules">
+          <mxGeometry x="410" y="0" width="90" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- 后端技术栈标签 -->
+        <mxCell id="backend-tech" value="技术栈：Node.js + Express + JWT + Multer + Nodemailer + Socket.io" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=14;fontColor=#666666;" vertex="1" parent="backend-layer">
+          <mxGeometry x="80" y="280" width="500" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- 数据存储层 -->
+        <mxCell id="database-layer" value="数据存储层" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;fontSize=20;fontColor=#38761D;strokeColor=#38761D;" vertex="1" parent="1">
+          <mxGeometry x="80" y="820" width="660" height="320" as="geometry" />
+        </mxCell>
+        
+        <!-- MySQL数据库 -->
+        <mxCell id="mysql-db" value="MySQL 数据库" style="rounded=0;whiteSpace=wrap;html=1;fontSize=18;align=center;verticalAlign=middle;strokeColor=#38761D;fillColor=#D9EAD3;gradientColor=none;strokeWidth=2;" vertex="1" parent="database-layer">
+          <mxGeometry x="80" y="40" width="500" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- 数据库表组 -->
+        <mxCell id="database-tables" value="" style="group;strokeWidth=1;" vertex="1" connectable="0" parent="database-layer">
+          <mxGeometry x="80" y="120" width="500" height="160" as="geometry" />
+        </mxCell>
+        
+        <!-- 第一行数据库表 -->
+        <mxCell id="users-table" value="users" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#38761D;fillColor=#D9EAD3;gradientColor=none;" vertex="1" parent="database-tables">
+          <mxGeometry x="0" y="0" width="70" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="profiles-table" value="profiles" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#38761D;fillColor=#D9EAD3;gradientColor=none;" vertex="1" parent="database-tables">
+          <mxGeometry x="90" y="0" width="70" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="skills-table" value="skills" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#38761D;fillColor=#D9EAD3;gradientColor=none;" vertex="1" parent="database-tables">
+          <mxGeometry x="180" y="0" width="70" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="education-table" value="education" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#38761D;fillColor=#D9EAD3;gradientColor=none;" vertex="1" parent="database-tables">
+          <mxGeometry x="270" y="0" width="70" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="experiences-table" value="experiences" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#38761D;fillColor=#D9EAD3;gradientColor=none;" vertex="1" parent="database-tables">
+          <mxGeometry x="360" y="0" width="70" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="follows-table" value="follows" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#38761D;fillColor=#D9EAD3;gradientColor=none;" vertex="1" parent="database-tables">
+          <mxGeometry x="450" y="0" width="70" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- 第二行数据库表 -->
+        <mxCell id="files-table" value="files" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#38761D;fillColor=#D9EAD3;gradientColor=none;" vertex="1" parent="database-tables">
+          <mxGeometry x="0" y="60" width="70" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="comments-table" value="comments" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#38761D;fillColor=#D9EAD3;gradientColor=none;" vertex="1" parent="database-tables">
+          <mxGeometry x="90" y="60" width="70" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="likes-table" value="likes" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#38761D;fillColor=#D9EAD3;gradientColor=none;" vertex="1" parent="database-tables">
+          <mxGeometry x="180" y="60" width="70" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="notifications-table" value="notifications" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#38761D;fillColor=#D9EAD3;gradientColor=none;" vertex="1" parent="database-tables">
+          <mxGeometry x="270" y="60" width="70" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="sessions-table" value="sessions" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#38761D;fillColor=#D9EAD3;gradientColor=none;" vertex="1" parent="database-tables">
+          <mxGeometry x="360" y="60" width="70" height="40" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="configs-table" value="configs" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fontSize=14;align=center;verticalAlign=middle;strokeColor=#38761D;fillColor=#D9EAD3;gradientColor=none;" vertex="1" parent="database-tables">
+          <mxGeometry x="450" y="60" width="70" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- 数据库说明 -->
+        <mxCell id="db-desc" value="说明：所有数据表均采用 InnoDB 引擎，支持事务与外键约束" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=14;fontColor=#666666;" vertex="1" parent="database-layer">
+          <mxGeometry x="80" y="290" width="500" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- 前端到后端连接 -->
+        <mxCell id="frontend-to-backend" value="HTTP/HTTPS (RESTful API)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontSize=14;align=center;verticalAlign=middle;endArrow=classic;endFill=1;strokeColor=#666666;strokeWidth=1;" edge="1" parent="1" source="frontend-layer" target="backend-layer">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="410" y="460" as="targetPoint" />
+            <Array as="points">
+              <mxPoint x="410" y="430" />
+              <mxPoint x="410" y="460" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- 后端到数据库连接 -->
+        <mxCell id="backend-to-database" value="数据库操作 (ORM: Sequelize)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontSize=14;align=center;verticalAlign=middle;endArrow=classic;endFill=1;strokeColor=#666666;strokeWidth=1;" edge="1" parent="1" source="backend-layer" target="database-layer">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="410" y="820" as="targetPoint" />
+            <Array as="points">
+              <mxPoint x="410" y="780" />
+              <mxPoint x="410" y="820" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- 系统架构标题 -->
+        <mxCell id="system-arch-title" value="个人职业资料管理平台系统架构图" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=24;fontColor=#333333;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="180" y="20" width="460" height="40" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

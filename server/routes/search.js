@@ -1,8 +1,6 @@
 import express from 'express';
-import { getElasticsearchClient, getRedisClient } from '../config/database.js';
-import User from '../models/User.js';
-import Profile from '../models/Profile.js';
 import { optionalAuth } from '../middleware/auth.js';
+import { getMySQLPool } from '../config/database.js';
 
 const router = express.Router();
 
@@ -21,76 +19,62 @@ router.get('/users', optionalAuth, async (req, res) => {
       });
     }
 
-    const esClient = getElasticsearchClient();
+    const pool = getMySQLPool();
 
-    // 如果 Elasticsearch 可用，使用它进行搜索
-    if (esClient) {
-      try {
-        const result = await esClient.search({
-          index: 'users',
-          body: {
-            query: {
-              multi_match: {
-                query,
-                fields: ['username^3', 'bio', 'skills', 'location'],
-                type: 'best_fields'
-              }
-            },
-            highlight: {
-              fields: {
-                username: {},
-                bio: {},
-                skills: {}
-              }
-            },
-            from: (parseInt(page) - 1) * parseInt(limit),
-            size: parseInt(limit)
-          }
-        });
+    // 构建搜索查询
+    const searchFields = ['u.username', 'up.bio', 'up.location', 'up.website'];
+    const searchConditions = [];
+    const params = [];
 
-        const users = result.hits.hits.map(hit => ({
-          ...hit._source,
-          score: hit._score,
-          highlights: hit.highlight
-        }));
-
-        return res.json({
-          users,
-          total: result.hits.total.value,
-          page: parseInt(page),
-          limit: parseInt(limit)
-        });
-
-      } catch (esError) {
-        console.error('Elasticsearch搜索失败:', esError);
-        // 降级到 MongoDB 搜索
-      }
+    for (const field of searchFields) {
+      searchConditions.push(`${field} LIKE ?`);
+      params.push(`%${query}%`);
     }
 
-    // MongoDB 降级搜索
-    const users = await User.find({
-      $or: [
-        { username: { $regex: query, $options: 'i' } },
-        { bio: { $regex: query, $options: 'i' } },
-        { skills: { $elemMatch: { $regex: query, $options: 'i' } } },
-        { location: { $regex: query, $options: 'i' } }
-      ],
-      isActive: true
-    })
-      .select('userId username avatar bio location skills socialLinks')
-      .skip((parseInt(page) - 1) * parseInt(limit))
-      .limit(parseInt(limit))
-      .lean();
+    // 为技能单独查询
+    searchConditions.push(`us.skill_name LIKE ?`);
+    params.push(`%${query}%`);
 
-    const total = await User.countDocuments({
-      $or: [
-        { username: { $regex: query, $options: 'i' } },
-        { bio: { $regex: query, $options: 'i' } },
-        { skills: { $elemMatch: { $regex: query, $options: 'i' } } },
-        { location: { $regex: query, $options: 'i' } }
-      ],
-      isActive: true
-    });
+    const searchQuery = `(${searchConditions.join(' OR ')})`;
+
+    // 查询总数
+    const countQuery = `
+      SELECT COUNT(DISTINCT u.id) as total
+      FROM users u
+      LEFT JOIN user_profiles up ON u.id = up.user_id
+      LEFT JOIN user_skills us ON u.id = us.user_id
+      WHERE ${searchQuery}
+    `;
+
+    const [totalResult] = await pool.execute(countQuery, params);
+    const total = totalResult[0].total;
+
+    // 构建主查询，包含分页
+    const paginatedQuery = `
+      SELECT DISTINCT u.id, u.username, u.avatar, up.bio, up.location, up.website, u.created_at
+      FROM users u
+      LEFT JOIN user_profiles up ON u.id = up.user_id
+      LEFT JOIN user_skills us ON u.id = us.user_id
+      WHERE ${searchQuery}
+      ORDER BY u.created_at DESC
+      LIMIT ? OFFSET ?
+    `;
+
+    const paginatedParams = [...params, parseInt(limit), (parseInt(page) - 1) * parseInt(limit)];
+
+    const [users] = await pool.execute(paginatedQuery, paginatedParams);
+
+    // 获取每个用户的技能，并移除内部的created_at字段（不对外暴露）
+    for (const user of users) {
+      const [skills] = await pool.execute(
+        'SELECT skill_name FROM user_skills WHERE user_id = ?',
+        [user.id]
+      );
+      user.skills = skills.map(skill => skill.skill_name);
+
+      // 删除内部的created_at字段，因为它仅用于排序
+      delete user.created_at;
+    }
 
     res.json({
       users,
@@ -122,117 +106,71 @@ router.get('/files', optionalAuth, async (req, res) => {
       });
     }
 
-    const esClient = getElasticsearchClient();
+    const pool = getMySQLPool();
 
-    // 如果 Elasticsearch 可用，使用它进行搜索
-    if (esClient) {
-      try {
-        const mustQuery = [{
-          multi_match: {
-            query,
-            fields: ['title^3', 'description^2', 'tags', 'originalName'],
-            type: 'best_fields'
-          }
-        }];
+    // 构建搜索查询
+    const searchFields = ['uf.title', 'uf.description', 'uf.original_name', 'ft.tag'];
+    const searchConditions = [];
+    const params = [];
 
-        if (category) {
-          mustQuery.push({ term: { category } });
-        }
-
-        const result = await esClient.search({
-          index: 'files',
-          body: {
-            query: {
-              bool: {
-                must: mustQuery,
-                filter: [
-                  { term: { visibility: 'public' } }
-                ]
-              }
-            },
-            highlight: {
-              fields: {
-                title: {},
-                description: {},
-                tags: {}
-              }
-            },
-            from: (parseInt(page) - 1) * parseInt(limit),
-            size: parseInt(limit)
-          }
-        });
-
-        const files = result.hits.hits.map(hit => ({
-          ...hit._source,
-          score: hit._score,
-          highlights: hit.highlight
-        }));
-
-        return res.json({
-          files,
-          total: result.hits.total.value,
-          page: parseInt(page),
-          limit: parseInt(limit)
-        });
-
-      } catch (esError) {
-        console.error('Elasticsearch搜索失败:', esError);
-        // 降级到 MongoDB 搜索
-      }
+    for (const field of searchFields) {
+      searchConditions.push(`${field} LIKE ?`);
+      params.push(`%${query}%`);
     }
 
-    // MongoDB 降级搜索
-    const searchQuery = {
-      $and: [
-        { 'files.visibility': 'public' },
-        {
-          $or: [
-            { 'files.title': { $regex: query, $options: 'i' } },
-            { 'files.description': { $regex: query, $options: 'i' } },
-            { 'files.tags': { $elemMatch: { $regex: query, $options: 'i' } } },
-            { 'files.originalName': { $regex: query, $options: 'i' } }
-          ]
-        }
-      ]
-    };
+    const searchQuery = `(${searchConditions.join(' OR ')})`;
+
+    // 构建主查询
+    let baseQuery = `
+      SELECT uf.*, u.username as owner_username,
+             (SELECT COUNT(*) FROM file_likes fl WHERE fl.file_id = uf.id) as likeCount,
+             (SELECT COUNT(*) FROM file_comments fc WHERE fc.file_id = uf.id) as commentCount
+      FROM user_files uf
+      JOIN users u ON uf.user_id = u.id
+      LEFT JOIN file_tags ft ON uf.id = ft.file_id
+      WHERE uf.visibility = 'public' AND ${searchQuery}
+    `;
 
     if (category) {
-      searchQuery.$and.push({ 'files.category': category });
+      baseQuery += ` AND uf.category = ?`;
+      params.push(category);
     }
 
-    const profiles = await Profile.find(searchQuery)
-      .select('userId files')
-      .skip((parseInt(page) - 1) * parseInt(limit))
-      .limit(parseInt(limit))
-      .lean();
+    baseQuery += ' GROUP BY uf.id ORDER BY uf.uploaded_at DESC';
 
-    // 提取匹配的文件
-    let files = [];
-    profiles.forEach(profile => {
-      profile.files.forEach(file => {
-        const matchesQuery =
-          file.title.toLowerCase().includes(query.toLowerCase()) ||
-          (file.description && file.description.toLowerCase().includes(query.toLowerCase())) ||
-          file.tags.some(tag => tag.toLowerCase().includes(query.toLowerCase())) ||
-          file.originalName.toLowerCase().includes(query.toLowerCase());
+    // 查询总数
+    let countQuery = `
+      SELECT COUNT(DISTINCT uf.id) as total
+      FROM user_files uf
+      JOIN users u ON uf.user_id = u.id
+      LEFT JOIN file_tags ft ON uf.id = ft.file_id
+      WHERE uf.visibility = 'public' AND ${searchQuery}
+    `;
 
-        const matchesCategory = !category || file.category === category;
+    if (category) {
+      countQuery += ` AND uf.category = ?`;
+    }
 
-        if (matchesQuery && matchesCategory) {
-          files.push({
-            ...file,
-            ownerId: profile.userId,
-            likeCount: file.likes.length,
-            commentCount: file.comments.length
-          });
-        }
-      });
-    });
+    const [totalResult] = await pool.execute(countQuery, params);
+    const total = totalResult[0].total;
 
-    const total = files.length;
+    // 添加分页
+    const paginatedQuery = `${baseQuery} LIMIT ? OFFSET ?`;
+    params.push(parseInt(limit), (parseInt(page) - 1) * parseInt(limit));
+
+    const [files] = await pool.execute(paginatedQuery, params);
+
+    // 为每个文件获取标签
+    for (const file of files) {
+      const [tags] = await pool.execute(
+        'SELECT tag FROM file_tags WHERE file_id = ?',
+        [file.id]
+      );
+      file.tags = tags.map(tag => tag.tag);
+    }
 
     res.json({
-      files: files.slice(0, parseInt(limit)),
+      files,
       total,
       page: parseInt(page),
       limit: parseInt(limit)
@@ -259,27 +197,16 @@ router.get('/suggestions', async (req, res) => {
       return res.json({ suggestions: [] });
     }
 
-    const redisClient = getRedisClient();
-    const cacheKey = `search:suggestions:${query}`;
-
-    // 尝试从缓存获取
-    try {
-      const cached = await redisClient.get(cacheKey);
-      if (cached) {
-        return res.json({ suggestions: JSON.parse(cached) });
-      }
-    } catch (cacheError) {
-      console.log('缓存查询失败，继续数据库查询');
-    }
+    const pool = getMySQLPool();
 
     // 获取用户建议
-    const users = await User.find({
-      username: { $regex: `^${query}`, $options: 'i' },
-      isActive: true
-    })
-      .select('username')
-      .limit(5)
-      .lean();
+    const [users] = await pool.execute(
+      `SELECT username FROM users
+       WHERE username LIKE ?
+       ORDER BY created_at DESC
+       LIMIT 5`,
+      [`${query}%`]
+    );
 
     const suggestions = {
       users: users.map(u => ({
@@ -288,13 +215,6 @@ router.get('/suggestions', async (req, res) => {
         label: u.username
       }))
     };
-
-    // 缓存结果（10分钟）
-    try {
-      await redisClient.setEx(cacheKey, 600, JSON.stringify(suggestions));
-    } catch (cacheError) {
-      console.log('缓存设置失败:', cacheError.message);
-    }
 
     res.json(suggestions);
 
