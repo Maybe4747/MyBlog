@@ -8,7 +8,7 @@ export const getUserById = async (userId) => {
   
   const [users] = await pool.execute(
     `SELECT u.id, u.username, u.email, u.avatar, u.created_at, u.updated_at, u.last_login,
-            up.bio, up.location, up.website, up.company, up.position
+            up.bio, up.location, up.website, up.company, up.position, up.cover_image
      FROM users u
      LEFT JOIN user_profiles up ON u.id = up.user_id
      WHERE u.id = ?`,
@@ -82,7 +82,7 @@ export const getUserByUsername = async (username) => {
   
   const [users] = await pool.execute(
     `SELECT u.id, u.username, u.email, u.avatar, u.created_at, u.updated_at, u.last_login,
-            up.bio, up.location, up.website, up.company, up.position
+            up.bio, up.location, up.website, up.company, up.position, up.cover_image
      FROM users u
      LEFT JOIN user_profiles up ON u.id = up.user_id
      WHERE u.username = ?`,
@@ -220,25 +220,37 @@ export const createUserProfile = async (userId, profileData, connection = null) 
 export const updateUserProfile = async (userId, profileData) => {
   const pool = getMySQLPool();
   
-  // 更新用户档案
-  await pool.execute(
-    `INSERT INTO user_profiles (user_id, bio, location, website, company, position) 
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE 
-     bio = VALUES(bio),
-     location = VALUES(location),
-     website = VALUES(website),
-     company = VALUES(company),
-     position = VALUES(position)`,
-    [
-      userId,
-      profileData.bio || null,
-      profileData.location || null,
-      profileData.website || null,
-      profileData.company || null,
-      profileData.position || null
-    ]
-  );
+  // 更新用户档案（只更新提供的字段）
+  if (profileData.bio !== undefined || profileData.location !== undefined || 
+      profileData.website !== undefined || profileData.company !== undefined || 
+      profileData.position !== undefined) {
+    // 先获取现有数据
+    const [existing] = await pool.execute(
+      'SELECT * FROM user_profiles WHERE user_id = ?',
+      [userId]
+    );
+    
+    const existingData = existing[0] || {};
+    
+    // 构建更新值（使用提供的值或保留现有值）
+    const bio = profileData.bio !== undefined ? (profileData.bio || null) : existingData.bio;
+    const location = profileData.location !== undefined ? (profileData.location || null) : existingData.location;
+    const website = profileData.website !== undefined ? (profileData.website || null) : existingData.website;
+    const company = profileData.company !== undefined ? (profileData.company || null) : existingData.company;
+    const position = profileData.position !== undefined ? (profileData.position || null) : existingData.position;
+    
+    await pool.execute(
+      `INSERT INTO user_profiles (user_id, bio, location, website, company, position) 
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE 
+       bio = ?,
+       location = ?,
+       website = ?,
+       company = ?,
+       position = ?`,
+      [userId, bio, location, website, company, position, bio, location, website, company, position]
+    );
+  }
   
   // 如果提供了技能，则更新
   if (profileData.skills !== undefined) {

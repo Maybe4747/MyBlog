@@ -1,7 +1,7 @@
 import express from 'express';
 import { body, validationResult } from 'express-validator';
 import { authenticateToken } from '../middleware/auth.js';
-import { getFileCategory } from '../utils/upload.js';
+import { getFileCategory, uploadMultiple, processFileUpload } from '../utils/upload.js';
 import { createFile, updateFile, deleteFile, getFileById } from '../services/fileService.js';
 import { likeFile } from '../services/socialService.js';
 import { getMySQLPool } from '../config/database.js';
@@ -21,7 +21,7 @@ router.get('/my', authenticateToken, async (req, res) => {
     // 获取用户的基本信息
     const [users] = await pool.execute(
       `SELECT u.id, u.username, u.email, u.avatar, u.created_at, u.updated_at, u.last_login,
-               up.bio, up.location, up.website, up.company, up.position
+               up.bio, up.location, up.website, up.company, up.position, up.cover_image
        FROM users u
        LEFT JOIN user_profiles up ON u.id = up.user_id
        WHERE u.id = ?`,
@@ -60,6 +60,7 @@ router.get('/my', authenticateToken, async (req, res) => {
         bio: users[0].bio,
         location: users[0].location,
         website: users[0].website,
+        coverImage: users[0].cover_image || null,
         company: users[0].company,
         position: users[0].position,
         createdAt: users[0].created_at,
@@ -82,7 +83,7 @@ router.get('/my', authenticateToken, async (req, res) => {
  * @desc    添加文件到档案
  * @access  Private
  */
-router.post('/files', authenticateToken, [
+router.post('/files', authenticateToken, uploadMultiple('files'), [
   body('title')
     .trim()
     .notEmpty()
@@ -123,10 +124,14 @@ router.post('/files', authenticateToken, [
     const file = req.files[0];
     const category = getFileCategory(file.mimetype);
 
+    // 上传文件到TOS或本地存储，获取URL
+    const fileUrl = await processFileUpload(file, userId, 'file');
+
     // 创建文件记录
     const fileData = {
       userId,
-      filename: file.filename,
+      filename: file.filename, // 保留原始文件名用于显示
+      fileUrl: fileUrl, // 存储文件URL
       originalName: file.originalname,
       mimeType: file.mimetype,
       size: file.size,
@@ -147,7 +152,7 @@ router.post('/files', authenticateToken, [
   } catch (error) {
     console.error('添加文件错误:', error);
     res.status(500).json({
-      error: '添加文件失败'
+      error: '添加文件失败: ' + error.message
     });
   }
 });

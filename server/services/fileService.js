@@ -142,13 +142,17 @@ export const getPublicFiles = async (options = {}) => {
 export const createFile = async (fileData) => {
   const pool = getMySQLPool();
   
+  // 如果提供了fileUrl，使用fileUrl；否则使用filename（兼容旧代码）
+  const fileUrl = fileData.fileUrl || fileData.filename;
+  
   const [result] = await pool.execute(
     `INSERT INTO user_files 
-     (user_id, filename, original_name, mime_type, size, category, title, description, visibility) 
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (user_id, filename, file_url, original_name, mime_type, size, category, title, description, visibility) 
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       fileData.userId,
       fileData.filename,
+      fileUrl,
       fileData.originalName,
       fileData.mimeType,
       fileData.size,

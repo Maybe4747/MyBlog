@@ -226,6 +226,7 @@ router.get('/me', authenticateToken, async (req, res) => {
           bio: user.bio,
           location: user.location,
           website: user.website,
+          coverImage: user.cover_image || null,
           skills: user.skills,
           socialLinks: user.socialLinks,
           privacySettings: {
