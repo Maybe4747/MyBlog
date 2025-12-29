@@ -7,13 +7,13 @@ import { TosClient } from '@volcengine/tos-sdk';
 import path from 'path';
 import crypto from 'crypto';
 
-// 从环境变量获取配置
+// 从环境变量获取配置（去除首尾空格）
 const TOS_CONFIG = {
-  accessKeyId: process.env.TOS_ACCESS_KEY_ID,
-  accessKeySecret: process.env.TOS_ACCESS_KEY_SECRET,
-  region: process.env.TOS_REGION || 'cn-beijing', // 默认北京区域
-  endpoint: process.env.TOS_ENDPOINT, // 例如: tos-cn-beijing.volces.com
-  bucket: process.env.TOS_BUCKET_NAME,
+  accessKeyId: process.env.TOS_ACCESS_KEY_ID?.trim(),
+  accessKeySecret: process.env.TOS_ACCESS_KEY_SECRET?.trim(),
+  region: (process.env.TOS_REGION || 'cn-beijing').trim(), // 默认北京区域
+  endpoint: process.env.TOS_ENDPOINT?.trim(), // 例如: tos-cn-beijing.volces.com
+  bucket: process.env.TOS_BUCKET_NAME?.trim(),
 };
 
 // 创建TOS客户端

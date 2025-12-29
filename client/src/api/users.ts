@@ -42,3 +42,10 @@ export const followUser = async (userId: number) => {
 export const unfollowUser = async (userId: number) => {
   return api.delete(`/social/follow/${userId}`);
 };
+
+/**
+ * 获取所有公开文件列表
+ */
+export const getPublicFiles = async (params: { page?: number; limit?: number; category?: string } = {}) => {
+  return api.get('/files/public', { params });
+};

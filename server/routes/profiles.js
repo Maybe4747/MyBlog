@@ -3,7 +3,7 @@ import { body, validationResult } from 'express-validator';
 import { authenticateToken } from '../middleware/auth.js';
 import { getFileCategory, uploadMultiple, processFileUpload } from '../utils/upload.js';
 import { createFile, updateFile, deleteFile, getFileById } from '../services/fileService.js';
-import { likeFile } from '../services/socialService.js';
+import { likeFile, unlikeFile } from '../services/socialService.js';
 import { getMySQLPool } from '../config/database.js';
 
 const router = express.Router();
@@ -30,7 +30,10 @@ router.get('/my', authenticateToken, async (req, res) => {
 
     if (users.length === 0) {
       return res.status(404).json({
-        error: '用户不存在'
+        code: 404,
+        data: null,
+        error: '用户不存在',
+        msg: '用户不存在'
       });
     }
 
@@ -51,29 +54,47 @@ router.get('/my', authenticateToken, async (req, res) => {
       [userId]
     );
 
+    // 获取关注数量（当前用户关注了多少人）
+    const [followingCount] = await pool.execute(
+      'SELECT COUNT(*) as count FROM follows WHERE follower_id = ?',
+      [userId]
+    );
+
     res.json({
-      profile: {
-        userId: users[0].id,
-        username: users[0].username,
-        email: users[0].email,
-        avatar: users[0].avatar,
-        bio: users[0].bio,
-        location: users[0].location,
-        website: users[0].website,
-        coverImage: users[0].cover_image || null,
-        company: users[0].company,
-        position: users[0].position,
-        createdAt: users[0].created_at,
-        totalFiles: filesCount[0].count,
-        totalDownloads: totalDownloads[0].total,
-        followerCount: followersCount[0].count
-      }
+      code: 0,
+      data: {
+        profile: {
+          userId: users[0].id,
+          username: users[0].username,
+          email: users[0].email,
+          avatar: users[0].avatar,
+          bio: users[0].bio,
+          location: users[0].location,
+          website: users[0].website,
+          coverImage: users[0].cover_image || null,
+          company: users[0].company,
+          position: users[0].position,
+          createdAt: users[0].created_at,
+          totalFiles: filesCount[0].count,
+          totalDownloads: totalDownloads[0].total,
+          followerCount: followersCount[0].count,
+          followingCount: followingCount[0].count
+        }
+      },
+      msg: '获取成功'
     });
 
   } catch (error) {
-    console.error('获取用户档案错误:', error);
+    console.error('获取用户档案错误:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
     res.status(500).json({
-      error: '获取档案失败'
+      code: 500,
+      data: null,
+      error: '获取档案失败',
+      msg: error.message || '获取档案失败'
     });
   }
 });
@@ -83,7 +104,7 @@ router.get('/my', authenticateToken, async (req, res) => {
  * @desc    添加文件到档案
  * @access  Private
  */
-router.post('/files', authenticateToken, uploadMultiple('files'), [
+router.post('/files', authenticateToken, uploadMultiple('file'), [
   body('title')
     .trim()
     .notEmpty()
@@ -130,7 +151,7 @@ router.post('/files', authenticateToken, uploadMultiple('files'), [
     // 创建文件记录
     const fileData = {
       userId,
-      filename: file.filename, // 保留原始文件名用于显示
+      filename: file.filename || file.originalname, // 保留原始文件名用于显示
       fileUrl: fileUrl, // 存储文件URL
       originalName: file.originalname,
       mimeType: file.mimetype,
@@ -138,7 +159,7 @@ router.post('/files', authenticateToken, uploadMultiple('files'), [
       category,
       title,
       description,
-      tags,
+      tags: Array.isArray(tags) ? tags : [],
       visibility
     };
 
@@ -266,14 +287,9 @@ router.post('/files/:fileId/like', authenticateToken, async (req, res) => {
     const file = await getFileById(fileId);
     if (!file) {
       return res.status(404).json({
-        error: '文件不存在'
-      });
-    }
-
-    // 检查是否是自己点赞自己的文件
-    if (file.owner_id === userId) {
-      return res.status(400).json({
-        error: '不能给自己的文件点赞'
+        code: 404,
+        data: null,
+        msg: '文件不存在'
       });
     }
 
@@ -282,18 +298,71 @@ router.post('/files/:fileId/like', authenticateToken, async (req, res) => {
 
     if (success) {
       res.json({
-        message: '点赞成功'
+        code: 0,
+        data: { liked: true },
+        msg: '点赞成功'
       });
     } else {
       res.status(500).json({
-        error: '点赞失败'
+        code: 500,
+        data: null,
+        msg: '点赞失败'
       });
     }
 
   } catch (error) {
     console.error('点赞错误:', error);
     res.status(500).json({
-      error: '点赞失败'
+      code: 500,
+      data: null,
+      msg: '点赞失败: ' + error.message
+    });
+  }
+});
+
+/**
+ * @route   DELETE /api/profiles/files/:fileId/like
+ * @desc    取消点赞文件
+ * @access  Private
+ */
+router.delete('/files/:fileId/like', authenticateToken, async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    const userId = req.user.id;
+
+    // 获取文件信息
+    const file = await getFileById(fileId);
+    if (!file) {
+      return res.status(404).json({
+        code: 404,
+        data: null,
+        msg: '文件不存在'
+      });
+    }
+
+    // 取消点赞
+    const success = await unlikeFile(userId, fileId);
+
+    if (success) {
+      res.json({
+        code: 0,
+        data: { liked: false },
+        msg: '取消点赞成功'
+      });
+    } else {
+      res.status(500).json({
+        code: 500,
+        data: null,
+        msg: '取消点赞失败'
+      });
+    }
+
+  } catch (error) {
+    console.error('取消点赞错误:', error);
+    res.status(500).json({
+      code: 500,
+      data: null,
+      msg: '取消点赞失败: ' + error.message
     });
   }
 });

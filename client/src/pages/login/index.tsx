@@ -118,6 +118,7 @@ const Login = () => {
                 name="email"
                 value={formData.email}
                 onChange={handleChange}
+                autoComplete="email"
                 className={`w-full px-4 py-3 rounded-lg border ${
                   errors.email ? 'border-red-300' : 'border-gray-300'
                 } focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white/50 backdrop-blur-sm transition-all`}
@@ -139,6 +140,7 @@ const Login = () => {
                   name="password"
                   value={formData.password}
                   onChange={handleChange}
+                  autoComplete="current-password"
                   className={`w-full px-4 py-3 rounded-lg border ${
                     errors.password ? 'border-red-300' : 'border-gray-300'
                   } focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white/50 backdrop-blur-sm pr-12 transition-all`}

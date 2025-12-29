@@ -18,9 +18,14 @@ import {
 import { initSocket } from './socket/handler.js';
 import { initSearchEngine } from './utils/search.js';
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 
 const server = createServer(app);
+
+// 设置服务器超时时间，支持大文件上传（10分钟）
+server.timeout = 600000; // 10分钟
+server.keepAliveTimeout = 65000; // 65秒
+server.headersTimeout = 66000; // 66秒
 
 // 初始化所有服务
 const initialize = async () => {

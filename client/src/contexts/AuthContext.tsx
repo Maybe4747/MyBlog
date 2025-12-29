@@ -16,7 +16,20 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
+  // 从 localStorage 读取缓存的用户信息作为初始值，避免首次渲染时显示默认头像
+  const getCachedUser = (): User | null => {
+    try {
+      const cachedUser = localStorage.getItem('user');
+      if (cachedUser) {
+        return JSON.parse(cachedUser);
+      }
+    } catch (err) {
+      console.error('解析缓存的用户信息失败:', err);
+    }
+    return null;
+  };
+
+  const [user, setUser] = useState<User | null>(getCachedUser());
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,14 +42,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           const response = await getCurrentUser();
           const { data,code,msg}=response;
           if (code === 0) {
-            setUser(data.user);
+            const userData = data.user;
+            setUser(userData);
+            // 缓存用户信息到 localStorage，以便下次快速加载
+            localStorage.setItem('user', JSON.stringify(userData));
           }
         } catch (err) {
           console.error('获取用户信息失败:', err);
           localStorage.removeItem('token');
           localStorage.removeItem('refreshToken');
           localStorage.removeItem('user');
+          setUser(null);
         }
+      } else {
+        // 如果没有 token，清除缓存的用户信息
+        localStorage.removeItem('user');
+        setUser(null);
       }
       setLoading(false);
     };

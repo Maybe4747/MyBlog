@@ -61,14 +61,37 @@ const getUploadConfig = () => {
     throw new Error('TOS配置不完整，请检查环境变量：TOS_ACCESS_KEY_ID, TOS_ACCESS_KEY_SECRET, TOS_BUCKET_NAME');
   }
   
+  // 解析文件大小限制
+  let maxFileSize = 20 * 1024 * 1024; // 默认20MB
+  if (process.env.UPLOAD_MAX_SIZE) {
+    const envSize = parseInt(process.env.UPLOAD_MAX_SIZE);
+    if (!isNaN(envSize) && envSize > 0) {
+      maxFileSize = envSize;
+    }
+  }
+  
+  console.log(`文件上传配置: 最大文件大小 = ${(maxFileSize / (1024 * 1024)).toFixed(2)}MB`);
+  
   return {
     storage: memoryStorage, // 只使用内存存储（上传到TOS）
     fileFilter,
     limits: {
-      fileSize: parseInt(process.env.UPLOAD_MAX_SIZE) || 10 * 1024 * 1024, // 默认10MB
+      fileSize: maxFileSize,
       files: 10 // 最多同时上传10个文件
     }
   };
+};
+
+// 获取当前配置的最大文件大小（用于错误信息）
+export const getMaxFileSize = () => {
+  let maxFileSize = 20 * 1024 * 1024; // 默认20MB
+  if (process.env.UPLOAD_MAX_SIZE) {
+    const envSize = parseInt(process.env.UPLOAD_MAX_SIZE);
+    if (!isNaN(envSize) && envSize > 0) {
+      maxFileSize = envSize;
+    }
+  }
+  return maxFileSize;
 };
 
 // 创建multer实例（每次请求时动态检查配置）
@@ -104,9 +127,24 @@ export const uploadMultiple = (fieldName, maxCount = 10) => {
     upload.array(fieldName, maxCount)(req, res, (err) => {
       if (err) {
         console.error('多文件上传中间件错误:', err);
+        
+        // 提供更友好的错误信息
+        let errorMessage = err.message;
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          // 从配置中获取实际的最大文件大小
+          const maxFileSize = getMaxFileSize();
+          const maxSizeMB = Math.round(maxFileSize / (1024 * 1024));
+          errorMessage = `文件大小超过限制（最大 ${maxSizeMB}MB）。请上传较小的文件。`;
+        } else if (err.code === 'LIMIT_FILE_COUNT') {
+          errorMessage = `文件数量超过限制（最多 ${maxCount} 个文件）`;
+        } else if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+          errorMessage = `意外的文件字段，请检查字段名是否正确`;
+        }
+        
         return res.status(400).json({
-          error: err.message,
-          code: 'UPLOAD_ERROR'
+          error: errorMessage,
+          code: err.code || 'UPLOAD_ERROR',
+          details: err.message
         });
       }
       next();

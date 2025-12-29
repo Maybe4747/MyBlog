@@ -1,36 +1,38 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { getUserFiles, getUserProfile, getUserActivity } from '../../api/users';
-import { getNotifications } from '../../api/notifications';
-import { getFollowers, getFollowing } from '../../api/social';
-import { addFile, getMyProfile } from '../../api/profiles';
+import { getUserFiles, getUserProfile, getUserActivity, getPublicFiles } from '../../api/users';
+import { addFile, getMyProfile, updateFile, deleteFile } from '../../api/profiles';
+import { createPost, getPosts, Post as ApiPost, updatePost, deletePost } from '../../api/posts';
+import { createArticle, getArticles, Article as ApiArticle, updateArticle, deleteArticle, getArticleById } from '../../api/articles';
 import Navbar from '../../components/Navbar';
 import { searchUsers } from '../../api/search';
-import { User, File } from '../../types';
+import { User } from '../../types';
 import {
-  SearchIcon,
-  BellIcon,
-  MailIcon,
-  PlusIcon,
   HeartIcon,
   MessageCircleIcon,
   ShareIcon,
   MoreHorizontalIcon,
-  UserIcon,
-  BriefcaseIcon,
-  MapPinIcon,
   CalendarIcon,
   UsersIcon,
   FileTextIcon,
   TrendingUpIcon,
-  XIcon
+  XIcon,
+  ImageIcon,
+  UserIcon,
+  MapPinIcon,
+  EditIcon,
+  TrashIcon,
+  VideoIcon,
+  UploadIcon
 } from 'lucide-react';
 import PostCreationModal from '../../components/PostCreationModal';
 import ArticleCreationModal from '../../components/ArticleCreationModal';
 
 interface Post {
-  id: number;
+  id: string | number; // 支持字符串（带前缀）和数字
+  originalId?: number; // 存储原始ID用于API调用
+  authorId?: number; // 作者ID，用于判断是否是作者
   author: {
     name: string;
     title: string;
@@ -47,12 +49,14 @@ interface Post {
   originalName?: string;
   size?: number;
   mimeType?: string;
-  contentType?: 'image' | 'article' | 'file';
+  contentType?: 'image' | 'article' | 'file' | 'video';
   mediaUrl?: string;
   readTime?: string;
   description?: string;
+  summary?: string; // 文章摘要
   claps?: number;
   articleUrl?: string;
+  visibility?: 'public' | 'followers' | 'private';
 }
 
 interface Connection {
@@ -73,137 +77,283 @@ const Home = () => {
   const [error, setError] = useState<string | null>(null);
   const [isPostModalOpen, setIsPostModalOpen] = useState(false);
   const [isArticleModalOpen, setIsArticleModalOpen] = useState(false);
+  const [postModalMediaType, setPostModalMediaType] = useState<'image' | 'video'>('image'); // 帖子弹窗的媒体类型
+  const [editingPost, setEditingPost] = useState<Post | null>(null);
+  const [deletingPostId, setDeletingPostId] = useState<string | number | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | number | null>(null); // 当前打开的下拉菜单ID
   const navigate = useNavigate();
+  const location = useLocation();
 
   // 使用一个标志来防止重复请求
   const hasFetchedData = useRef(false);
+  
+  // 发布成功提示状态
+  const [showSuccessMessage, setShowSuccessMessage] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  
+  // 用户统计数据
+  const [userStats, setUserStats] = useState({
+    followers: 0,
+    following: 0,
+    files: 0,
+    downloads: 0,
+    newFollowers: 0
+  });
 
   useEffect(() => {
-    const fetchHomeData = async () => {
-      // 防止重复请求
-      if (hasFetchedData.current) {
-        return;
+    if (user) {
+      const shouldRefresh = location.state?.refresh;
+      fetchHomeData(shouldRefresh);
+      // 清除 location state，避免重复刷新
+      if (shouldRefresh) {
+        window.history.replaceState({}, '');
+      }
+    }
+
+    // 清理函数，当组件卸载时重置标志
+    return () => {
+      // 不在这里重置，允许组件重新挂载时获取数据
+    };
+  }, [user, location.state]);
+
+  // 创建一个可重用的 fetchHomeData 函数
+  const fetchHomeData = async (forceRefresh = false) => {
+    if (hasFetchedData.current && !forceRefresh) {
+      return;
+    }
+
+    if (forceRefresh) {
+      hasFetchedData.current = false; // 重置标志以允许刷新
+    }
+    hasFetchedData.current = true;
+
+    try {
+      setLoading(true);
+
+      // 获取用户自己的档案信息
+      let userProfile: Partial<User> = {};
+      const stats = {
+        followers: 0,
+        following: 0,
+        files: 0,
+        downloads: 0,
+        newFollowers: 0
+      };
+      
+      try {
+        const profileResponse = await getMyProfile();
+        const profileData = profileResponse.data?.profile || profileResponse.data?.user || {};
+        userProfile = profileData;
+        
+        // 从API响应中提取统计数据
+        if (profileData.followerCount !== undefined) {
+          stats.followers = profileData.followerCount;
+        }
+        if (profileData.followingCount !== undefined) {
+          stats.following = profileData.followingCount;
+        }
+        if (profileData.totalFiles !== undefined) {
+          stats.files = profileData.totalFiles;
+        }
+        if (profileData.totalDownloads !== undefined) {
+          stats.downloads = profileData.totalDownloads;
+        }
+        
+        // 更新统计数据状态
+        setUserStats(stats);
+      } catch (profileError: any) {
+        console.error('获取用户档案失败:', profileError);
+        userProfile = {
+          username: user?.username,
+          avatar: user?.avatar,
+          position: user?.position,
+          title: user?.title,
+          location: user?.location,
+          skills: user?.skills,
+          stats: user?.stats || {}
+        };
       }
 
-      hasFetchedData.current = true;
-
+      // 获取推荐用户
+      let recommendedUsers: any[] = [];
       try {
-        setLoading(true);
+        const searchResponse = await searchUsers('default', { limit: 3 });
+        recommendedUsers = searchResponse.data?.data?.users || searchResponse.data?.users || [];
+      } catch (searchError: any) {
+        console.error('获取推荐用户失败:', searchError);
+        recommendedUsers = [];
+      }
 
-        // 获取用户自己的档案信息
-        let userProfile: Partial<User> = {};
-        try {
-          const profileResponse = await getMyProfile();
-          userProfile = profileResponse.data?.profile || profileResponse.data?.user || {};
-        } catch (profileError: any) {
-          console.error('获取用户档案失败:', profileError);
-          // 使用用户基本信息作为备选
-          userProfile = {
-            username: user?.username,
-            avatar: user?.avatar,
-            position: user?.position,
-            title: user?.title,
-            location: user?.location,
-            skills: user?.skills,
-            stats: user?.stats || {}
-          };
-        }
+      // 获取所有内容：posts、articles和files
+      const allPosts: Post[] = [];
 
-        // 获取推荐用户（模拟可能认识的人）
-        let recommendedUsers: any[] = [];
-        try {
-          // 只有在有用户信息的情况下才获取推荐用户，或者获取通用推荐
-          if (user?.username && user.username !== 'Maybe') {
-            const searchResponse = await searchUsers(user.username, { limit: 3 });
-            recommendedUsers = searchResponse.data?.users || [];
-          } else {
-            // 如果没有用户信息或用户名为'Maybe'，则获取通用推荐
-            const searchResponse = await searchUsers('default', { limit: 3 });
-            recommendedUsers = searchResponse.data?.users || [];
-          }
-        } catch (searchError: any) {
-          console.error('获取推荐用户失败:', searchError);
-          // 如果搜索失败，尝试获取通用推荐或随机用户
-          try {
-            const searchResponse = await searchUsers('default', { limit: 3 });
-            recommendedUsers = searchResponse.data?.users || [];
-          } catch (fallbackError: any) {
-            console.error('获取推荐用户的备用方法也失败:', fallbackError);
-          }
-        }
-
-
-        // 获取用户活动（如动态、文件、文章等）
-        let userActivity: any[] = [];
-        try {
-          if (user?.username && user.username !== 'Maybe') {
-            const activityResponse = await getUserActivity(user.username, { limit: 10 });
-            userActivity = activityResponse.data?.activity || activityResponse.data?.activities || [];
-          }
-        } catch (activityError: any) {
-          console.error('获取用户活动失败:', activityError);
-        }
-
-        // 将活动数据转换为帖子格式（简化版，不包含点赞评论）
-        const formattedPosts: Post[] = userActivity.map(activity => {
-          return {
-            id: activity.id,
+      // 1. 获取帖子（posts）
+      try {
+        const postsResponse: any = await getPosts({ limit: 20, visibility: 'public' });
+        if (postsResponse?.code === 0 && postsResponse?.data?.posts) {
+          const posts = postsResponse.data.posts.map((post: ApiPost) => ({
+            id: `post-${post.id}`, // 添加前缀确保唯一性
+            originalId: post.id, // 存储原始ID用于API调用
+            authorId: post.user_id, // 存储作者ID
             author: {
-              name: activity.username || user?.username || '用户',
+              name: post.username || '用户',
+              title: userProfile?.position || userProfile?.title || '用户',
+              company: userProfile?.company || '',
+              avatar: post.avatar || ''
+            },
+            content: post.content || '',
+            timestamp: new Date(post.created_at).toLocaleString('zh-CN'),
+            likes: post.like_count || 0,
+            comments: post.comment_count || 0,
+            shares: 0,
+            liked: post.liked || false,
+            contentType: post.image_url ? (post.image_url.match(/\.(mp4|webm|mov|mpeg)$/i) ? 'video' as const : 'image' as const) : 'image' as const,
+            mediaUrl: post.image_url || undefined,
+            description: post.content || '',
+            visibility: post.visibility
+          }));
+          allPosts.push(...posts);
+        }
+      } catch (postsError: any) {
+        console.error('获取帖子失败:', postsError);
+      }
+
+      // 2. 获取文章（articles）
+      try {
+        const articlesResponse: any = await getArticles({ limit: 20, visibility: 'public' });
+        if (articlesResponse?.code === 0 && articlesResponse?.data?.articles) {
+          const articles = articlesResponse.data.articles.map((article: ApiArticle) => ({
+            id: `article-${article.id}`, // 添加前缀确保唯一性
+            originalId: article.id, // 存储原始ID用于API调用
+            authorId: article.user_id, // 存储作者ID
+            author: {
+              name: article.username || '用户',
+              title: userProfile?.position || userProfile?.title || '用户',
+              company: userProfile?.company || '',
+              avatar: article.avatar || ''
+            },
+            content: article.summary || article.content.substring(0, 200) || '',
+            timestamp: new Date(article.created_at).toLocaleString('zh-CN'),
+            likes: article.like_count || 0,
+            comments: article.comment_count || 0,
+            shares: 0,
+            liked: article.liked || false,
+            title: article.title,
+            contentType: 'article' as const,
+            description: article.summary || '',
+            readTime: `${Math.ceil(article.content.length / 500)}分钟`,
+            visibility: article.visibility
+          }));
+          allPosts.push(...articles);
+        }
+      } catch (articlesError: any) {
+        console.error('获取文章失败:', articlesError);
+      }
+
+      // 3. 获取所有公开文件（类似posts和articles）
+      let userActivity: any[] = [];
+      try {
+        const filesResponse: any = await getPublicFiles({ limit: 20 });
+        console.log('文件API响应:', filesResponse);
+        if (filesResponse?.code === 0 && filesResponse?.data?.files) {
+          console.log('文件数量:', filesResponse.data.files.length);
+          // 将文件格式转换为活动格式
+          userActivity = filesResponse.data.files.map((file: any) => ({
+            id: file.id,
+            type: 'file_upload',
+            title: file.title,
+            description: file.description,
+            originalName: file.original_name,
+            size: file.size,
+            mimeType: file.mime_type,
+            fileUrl: file.file_url,
+            uploadedAt: file.uploaded_at,
+            likeCount: file.likeCount || 0,
+            commentCount: file.commentCount || 0,
+            userId: file.user_id,
+            username: file.owner_username,
+            avatar: file.avatar || null
+          }));
+          console.log('转换后的文件活动:', userActivity.length);
+        } else {
+          console.warn('文件API响应格式异常:', filesResponse);
+        }
+      } catch (activityError: any) {
+        console.error('获取公开文件失败:', activityError);
+      }
+
+      // 将文件活动转换为帖子格式
+      const filePosts: Post[] = userActivity.map(activity => {
+        let contentType: 'image' | 'article' | 'file' = 'file';
+        if (activity.mimeType?.startsWith('image/')) {
+          contentType = 'image';
+        } else if (activity.mimeType === 'text/markdown' || activity.tags?.includes('article')) {
+          contentType = 'article';
+        }
+        
+          return {
+            id: `file-${activity.id}`, // 添加前缀确保唯一性
+            originalId: activity.id, // 存储原始ID用于API调用
+            authorId: activity.userId || activity.user_id, // 存储作者ID
+            author: {
+              name: activity.username || activity.owner_username || user?.username || '用户',
               title: userProfile?.position || userProfile?.title || '用户',
               company: userProfile?.company || '',
               avatar: activity.avatar || user?.avatar || ''
             },
             content: activity.description || activity.title || '分享了一个文件',
-            timestamp: activity.uploadedAt ? new Date(activity.uploadedAt).toLocaleString('zh-CN') : '刚刚',
-            likes: 0,
-            comments: 0,
+            timestamp: activity.uploadedAt || activity.uploaded_at ? new Date(activity.uploadedAt || activity.uploaded_at).toLocaleString('zh-CN') : '刚刚',
+            likes: activity.likeCount || activity.like_count || 0,
+            comments: activity.commentCount || activity.comment_count || 0,
             shares: 0,
             liked: false,
             title: activity.title,
-            originalName: activity.originalName,
+            originalName: activity.originalName || activity.original_name,
             size: activity.size,
-            mimeType: activity.mimeType,
-            contentType: 'file'
+            mimeType: activity.mimeType || activity.mime_type,
+            contentType: contentType,
+            mediaUrl: activity.fileUrl || activity.file_url,
+            description: activity.description,
+            readTime: contentType === 'article' ? '5分钟' : undefined
           };
-        });
+      });
 
-        // 将推荐用户转换为连接格式
-        const formattedConnections: Connection[] = recommendedUsers.map(recUser => ({
-          id: recUser.id,
-          name: recUser.username,
-          title: recUser.position || '用户',
-          company: recUser.company || '',
-          avatar: recUser.avatar || '',
-          mutual: recUser.mutualConnections || 0
-        }));
+      allPosts.push(...filePosts);
 
-        setPosts(formattedPosts);
-        setConnections(formattedConnections);
-      } catch (err: any) {
-        setError(err.message || '获取数据失败');
-        console.error('获取首页数据失败:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
+      // 按时间排序（最新的在前）
+      const formattedPosts = allPosts.sort((a, b) => {
+        const timeA = new Date(a.timestamp).getTime();
+        const timeB = new Date(b.timestamp).getTime();
+        return timeB - timeA;
+      });
 
-    if (user && !hasFetchedData.current) {
-      fetchHomeData();
+      // 将推荐用户转换为连接格式
+      const formattedConnections: Connection[] = recommendedUsers.map(recUser => ({
+        id: recUser.id,
+        name: recUser.username,
+        title: recUser.position || '用户',
+        company: recUser.company || '',
+        avatar: recUser.avatar || '',
+        mutual: recUser.mutualConnections || 0
+      }));
+
+      setPosts(formattedPosts);
+      setConnections(formattedConnections);
+    } catch (err: any) {
+      setError(err.message || '获取数据失败');
+      console.error('获取首页数据失败:', err);
+    } finally {
+      setLoading(false);
+      hasFetchedData.current = false; // 允许下次重新获取
     }
-
-    // 清理函数，当组件卸载时重置标志
-    return () => {
-      hasFetchedData.current = false;
-    };
-  }, [user]);
+  };
 
   // 图片模态框状态
   const [imageModalOpen, setImageModalOpen] = useState(false);
   const [modalImageUrl, setModalImageUrl] = useState('');
   const [modalImageTitle, setModalImageTitle] = useState('');
 
-  const handleLike = async (postId: number) => {
+  const handleLike = async (postId: string | number) => {
     try {
       // 这里应该调用实际的API来点赞/取消点赞
       // 由于没有具体的点赞文件API，我们暂时只更新本地状态
@@ -215,6 +365,117 @@ const Home = () => {
     } catch (err: any) {
       setError(err.message || '操作失败');
       console.error('点赞操作失败:', err);
+    }
+  };
+
+  const handleDelete = async (postId: string | number) => {
+    if (!deletingPostId) return;
+    
+    // 检查是否是文件类型
+    const postToDelete = posts.find(p => p.id === postId);
+    if (postToDelete?.contentType === 'file' && postToDelete.originalId) {
+      try {
+        const result: any = await deleteFile(postToDelete.originalId);
+        if (result?.code === 0 || result?.message) {
+          setSuccessMessage('文件删除成功！');
+          setShowSuccessMessage(true);
+          setTimeout(() => {
+            setShowSuccessMessage(false);
+            setSuccessMessage('');
+          }, 3000);
+          // 刷新数据
+          fetchHomeData(true);
+        } else {
+          setError(result?.msg || result?.error || '删除文件失败');
+          setTimeout(() => setError(null), 5000);
+        }
+      } catch (error: any) {
+        console.error('删除文件失败:', error);
+        setError(error.message || '删除文件失败');
+        setTimeout(() => setError(null), 5000);
+      } finally {
+        setDeletingPostId(null);
+      }
+      return;
+    }
+    
+    try {
+      const post = posts.find(p => p.id === postId);
+      if (!post || !post.originalId) return;
+
+      if (post.contentType === 'article') {
+        await deleteArticle(post.originalId);
+      } else if (post.contentType === 'image' || post.contentType === 'file') {
+        await deletePost(post.originalId);
+      }
+
+      // 从列表中移除
+      setPosts(posts.filter(p => p.id !== postId));
+      setSuccessMessage('删除成功！');
+      setShowSuccessMessage(true);
+      setTimeout(() => setShowSuccessMessage(false), 3000);
+    } catch (err: any) {
+      setError(err.message || '删除失败');
+      console.error('删除失败:', err);
+    } finally {
+      setDeletingPostId(null);
+    }
+  };
+
+  // 点击外部关闭下拉菜单
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('.dropdown-menu-container')) {
+        setOpenMenuId(null);
+      }
+    };
+
+    if (openMenuId) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }
+  }, [openMenuId]);
+
+  const handleEdit = async (post: Post) => {
+    try {
+      // 如果是文件类型，跳转到文件详情页进行编辑
+      if (post.contentType === 'file' && post.originalId) {
+        navigate(`/files/${post.originalId}`);
+        return;
+      }
+      
+      if (post.contentType === 'article' && post.originalId) {
+        // 对于文章，需要获取完整内容
+        const result: any = await getArticleById(post.originalId);
+        if (result?.code === 0 && result?.data?.article) {
+          const article = result.data.article;
+          setEditingPost({
+            ...post,
+            title: article.title,
+            summary: article.summary || '',
+            content: article.content,
+            visibility: article.visibility
+          });
+          setIsArticleModalOpen(true);
+        }
+      } else {
+        // 对于帖子，直接使用现有数据
+        setEditingPost(post);
+        // 根据内容类型设置媒体类型
+        if (post.contentType === 'video') {
+          setPostModalMediaType('video');
+        } else {
+          setPostModalMediaType('image');
+        }
+        setIsPostModalOpen(true);
+      }
+    } catch (error: any) {
+      console.error('获取文章详情失败:', error);
+      setError('获取文章详情失败，请重试');
+      setTimeout(() => setError(null), 5000);
     }
   };
 
@@ -280,66 +541,81 @@ const Home = () => {
       )}
 
       {/* 主页面内容 */}
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-gradient-to-br from-blue-50/30 via-purple-50/20 to-pink-50/30">
         {/* Header */}
          <Navbar activeTab={activeTab} onTabChange={setActiveTab} />
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Left sidebar - User profile and quick stats */}
           <div className="lg:col-span-3 space-y-6">
             {/* User profile card */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="bg-gradient-to-br from-white via-blue-50/40 to-purple-50/30 rounded-2xl shadow-lg border border-blue-100/60 p-6 backdrop-blur-sm hover:shadow-xl transition-all duration-300">
               <div className="flex flex-col items-center">
-                <img
-                  className="h-20 w-20 rounded-full mb-4"
-                  src={user?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?ixlib=rb-1.2.1&auto=format&fit=crop&w=200&q=80'}
-                  alt={user?.username}
-                />
-                <h3 className="text-lg font-semibold text-gray-900">{user?.username || '用户'}</h3>
-                <p className="text-sm text-gray-600">{user?.position || user?.title || '软件工程师'}</p>
-                <p className="text-xs text-gray-500 mt-1">{user?.location || '北京'}</p>
+                <div className="relative mb-4">
+                  <div className="absolute inset-0 bg-gradient-to-br from-blue-200 to-purple-200 rounded-full blur-xl opacity-50"></div>
+                  <img
+                    className="h-20 w-20 rounded-full ring-4 ring-white/80 relative z-10"
+                    src={user?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?ixlib=rb-1.2.1&auto=format&fit=crop&w=200&q=80'}
+                    alt={user?.username}
+                  />
+                </div>
+                <h3 className="text-lg font-bold text-gray-900 mb-1">{user?.username || '用户'}</h3>
+                <p className="text-sm text-gray-600 font-medium">{user?.position || user?.title || '软件工程师'}</p>
+                <p className="text-xs text-gray-500 mt-1 flex items-center">
+                  <MapPinIcon className="w-3 h-3 mr-1" />
+                  {user?.location || '北京'}
+                </p>
 
-                <div className="flex space-x-4 mt-4 text-center">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-900">{user?.stats?.followers || 0}</p>
-                    <p className="text-xs text-gray-500">连接</p>
+                <div className="flex space-x-6 mt-6 text-center w-full border-t border-blue-100/50 pt-4">
+                  <div className="flex-1">
+                    <p className="text-lg font-bold text-blue-600">{userStats.followers}</p>
+                    <p className="text-xs text-gray-500 mt-1">粉丝</p>
                   </div>
-                  <div>
-                    <p className="text-sm font-semibold text-gray-900">{user?.stats?.following || 0}</p>
-                    <p className="text-xs text-gray-500">关注</p>
+                  <div className="flex-1">
+                    <p className="text-lg font-bold text-purple-600">{userStats.following}</p>
+                    <p className="text-xs text-gray-500 mt-1">关注</p>
                   </div>
-                  <div>
-                    <p className="text-sm font-semibold text-gray-900">{user?.stats?.files || 0}</p>
-                    <p className="text-xs text-gray-500">文件</p>
+                  <div className="flex-1">
+                    <p className="text-lg font-bold text-pink-600">{userStats.files}</p>
+                    <p className="text-xs text-gray-500 mt-1">文件</p>
                   </div>
                 </div>
               </div>
             </div>
 
             {/* Quick stats */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">今日洞察</h3>
+            <div className="bg-gradient-to-br from-white via-purple-50/30 to-pink-50/20 rounded-2xl shadow-lg border border-purple-100/60 p-6 backdrop-blur-sm hover:shadow-xl transition-all duration-300">
+              <h3 className="text-lg font-bold text-gray-900 mb-5 flex items-center">
+                <div className="w-1 h-6 bg-gradient-to-b from-blue-400 to-purple-400 rounded-full mr-2"></div>
+                今日洞察
+              </h3>
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between p-3 rounded-xl bg-white/60 backdrop-blur-sm hover:bg-white/80 transition-all">
                   <div className="flex items-center">
-                    <TrendingUpIcon className="h-5 w-5 text-blue-500 mr-2" />
-                    <span className="text-sm text-gray-600">文件下载量</span>
+                    <div className="p-2 bg-blue-100/50 rounded-lg mr-3">
+                      <TrendingUpIcon className="h-4 w-4 text-blue-600" />
+                    </div>
+                    <span className="text-sm font-medium text-gray-700">文件下载量</span>
                   </div>
-                  <span className="text-sm font-semibold text-gray-900">{user?.stats?.downloads || 0}</span>
+                  <span className="text-sm font-bold text-blue-600">{userStats.downloads}</span>
                 </div>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between p-3 rounded-xl bg-white/60 backdrop-blur-sm hover:bg-white/80 transition-all">
                   <div className="flex items-center">
-                    <UsersIcon className="h-5 w-5 text-green-500 mr-2" />
-                    <span className="text-sm text-gray-600">新增关注</span>
+                    <div className="p-2 bg-green-100/50 rounded-lg mr-3">
+                      <UsersIcon className="h-4 w-4 text-green-600" />
+                    </div>
+                    <span className="text-sm font-medium text-gray-700">新增关注</span>
                   </div>
-                  <span className="text-sm font-semibold text-gray-900">{user?.stats?.newFollowers || 0}</span>
+                  <span className="text-sm font-bold text-green-600">{userStats.newFollowers}</span>
                 </div>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between p-3 rounded-xl bg-white/60 backdrop-blur-sm hover:bg-white/80 transition-all">
                   <div className="flex items-center">
-                    <FileTextIcon className="h-5 w-5 text-purple-500 mr-2" />
-                    <span className="text-sm text-gray-600">上传文件</span>
+                    <div className="p-2 bg-purple-100/50 rounded-lg mr-3">
+                      <FileTextIcon className="h-4 w-4 text-purple-600" />
+                    </div>
+                    <span className="text-sm font-medium text-gray-700">上传文件</span>
                   </div>
-                  <span className="text-sm font-semibold text-gray-900">{user?.stats?.files || 0}</span>
+                  <span className="text-sm font-bold text-purple-600">{userStats.files}</span>
                 </div>
               </div>
             </div>
@@ -373,47 +649,100 @@ const Home = () => {
 
           {/* Main content based on active tab */}
           <div className="lg:col-span-6 space-y-6">
+            {/* 成功消息提示 */}
+            {showSuccessMessage && (
+              <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded-xl shadow-lg flex items-center justify-between animate-fade-in">
+                <div className="flex items-center">
+                  <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                  <span className="font-medium">{successMessage}</span>
+                </div>
+                <button
+                  onClick={() => setShowSuccessMessage(false)}
+                  className="text-green-600 hover:text-green-800"
+                >
+                  <XIcon className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            {/* 错误消息提示 */}
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-xl shadow-lg flex items-center justify-between animate-fade-in">
+                <div className="flex items-center">
+                  <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                  </svg>
+                  <span className="font-medium">{error}</span>
+                </div>
+                <button
+                  onClick={() => setError(null)}
+                  className="text-red-600 hover:text-red-800"
+                >
+                  <XIcon className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
             {activeTab === 'feed' && (
               <>
-                {/* Create post */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                  <div className="flex items-center space-x-4">
-                    <img
-                      className="h-12 w-12 rounded-full"
-                      src={user?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?ixlib=rb-1.2.1&auto=format&fit=crop&w=200&q=80'}
-                      alt={user?.username}
-                    />
+                {/* Create post - 优化样式 */}
+                <div className="bg-gradient-to-br from-white via-blue-50/40 to-purple-50/30 rounded-2xl shadow-lg border border-blue-100/60 p-6 backdrop-blur-sm hover:shadow-xl transition-all duration-300">
+                  <div className="flex items-center space-x-4 mb-4">
+                    <div className="relative">
+                      <div className="absolute inset-0 bg-gradient-to-br from-blue-200 to-purple-200 rounded-full blur-md opacity-40"></div>
+                      <img
+                        className="h-12 w-12 rounded-full ring-3 ring-white/80 relative z-10"
+                        src={user?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?ixlib=rb-1.2.1&auto=format&fit=crop&w=200&q=80'}
+                        alt={user?.username}
+                      />
+                    </div>
                     <button
-                      onClick={() => setIsPostModalOpen(true)}
-                      className="flex-1 text-left px-4 py-3 bg-gray-100 hover:bg-gray-200 rounded-full text-gray-500 transition-colors">
+                      onClick={() => {
+                        setPostModalMediaType('image');
+                        setIsPostModalOpen(true);
+                      }}
+                      className="flex-1 text-left px-5 py-3.5 bg-white/70 backdrop-blur-sm rounded-xl hover:bg-white/90 transition-all text-gray-600 border border-blue-100/60 focus:outline-none focus:ring-2 focus:ring-blue-300 shadow-sm hover:shadow-md font-medium">
                       分享些什么...
                     </button>
                   </div>
-                  <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-200">
-                    <div className="flex space-x-4">
+                  <div className="flex items-center justify-between pt-4 border-t border-blue-100/60">
+                    <div className="flex space-x-2">
                       <button
                         onClick={() => setIsPostModalOpen(true)}
-                        className="flex items-center text-gray-600 hover:text-blue-600 transition-colors">
-                        <svg className="w-5 h-5 mr-1 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                        <span className="text-sm">照片</span>
+                        className="flex items-center px-5 py-2.5 rounded-xl text-gray-700 hover:text-blue-600 hover:bg-gradient-to-r hover:from-blue-50 hover:to-blue-100/50 transition-all group shadow-sm hover:shadow-md">
+                        <div className="p-1.5 bg-blue-100/50 rounded-lg mr-2 group-hover:bg-blue-200/50 transition-colors">
+                          <ImageIcon className="w-4 h-4 text-blue-600 group-hover:scale-110 transition-transform" />
+                        </div>
+                        <span className="text-sm font-semibold">照片</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setPostModalMediaType('video');
+                          setIsPostModalOpen(true);
+                        }}
+                        className="flex items-center px-5 py-2.5 rounded-xl text-gray-700 hover:text-purple-600 hover:bg-gradient-to-r hover:from-purple-50 hover:to-purple-100/50 transition-all group shadow-sm hover:shadow-md">
+                        <div className="p-1.5 bg-purple-100/50 rounded-lg mr-2 group-hover:bg-purple-200/50 transition-colors">
+                          <VideoIcon className="w-4 h-4 text-purple-600 group-hover:scale-110 transition-transform" />
+                        </div>
+                        <span className="text-sm font-semibold">视频</span>
                       </button>
                       <button
                         onClick={() => setIsArticleModalOpen(true)}
-                        className="flex items-center text-gray-600 hover:text-green-600 transition-colors">
-                        <svg className="w-5 h-5 mr-1 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                        <span className="text-sm">文章</span>
+                        className="flex items-center px-5 py-2.5 rounded-xl text-gray-700 hover:text-green-600 hover:bg-gradient-to-r hover:from-green-50 hover:to-green-100/50 transition-all group shadow-sm hover:shadow-md">
+                        <div className="p-1.5 bg-green-100/50 rounded-lg mr-2 group-hover:bg-green-200/50 transition-colors">
+                          <FileTextIcon className="w-4 h-4 text-green-600 group-hover:scale-110 transition-transform" />
+                        </div>
+                        <span className="text-sm font-semibold">文章</span>
                       </button>
                       <button
-                        onClick={() => window.location.href = '/upload'}
-                        className="flex items-center text-gray-600 hover:text-purple-600 transition-colors">
-                        <svg className="w-5 h-5 mr-1 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        <span className="text-sm">文件</span>
+                        onClick={() => navigate('/upload')}
+                        className="flex items-center px-5 py-2.5 rounded-xl text-gray-700 hover:text-orange-600 hover:bg-gradient-to-r hover:from-orange-50 hover:to-orange-100/50 transition-all group shadow-sm hover:shadow-md">
+                        <div className="p-1.5 bg-orange-100/50 rounded-lg mr-2 group-hover:bg-orange-200/50 transition-colors">
+                          <UploadIcon className="w-4 h-4 text-orange-600 group-hover:scale-110 transition-transform" />
+                        </div>
+                        <span className="text-sm font-semibold">文件</span>
                       </button>
                     </div>
                   </div>
@@ -422,38 +751,75 @@ const Home = () => {
                 {/* Posts feed */}
                 {posts.length > 0 ? (
                   posts.map((post) => (
-                    <div key={post.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div key={post.id} className="bg-gradient-to-br from-white via-blue-50/30 to-purple-50/20 rounded-2xl shadow-lg border border-blue-100/60 overflow-hidden hover:shadow-xl transition-all duration-300 backdrop-blur-sm">
                       {/* Post header */}
-                      <div className="p-6 pb-4">
+                      <div className="p-6 pb-4 bg-gradient-to-r from-blue-50/30 to-purple-50/20 border-b border-blue-100/50">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center">
-                            <img
-                              className="h-12 w-12 rounded-full"
-                              src={post.author.avatar || `https://ui-avatars.com/api/?name=${post.author.name}&background=random`}
-                              alt={post.author.name}
-                            />
+                            <div className="relative">
+                              <div className="absolute inset-0 bg-gradient-to-br from-blue-200 to-purple-200 rounded-full blur-md opacity-30"></div>
+                              <img
+                                className="h-12 w-12 rounded-full ring-2 ring-white/80 relative z-10"
+                                src={post.author.avatar || `https://ui-avatars.com/api/?name=${post.author.name}&background=random`}
+                                alt={post.author.name}
+                              />
+                            </div>
                             <div className="ml-4">
-                              <h4 className="text-sm font-semibold text-gray-900">{post.author.name}</h4>
-                              <p className="text-sm text-gray-600">{post.author.title} · {post.author.company}</p>
-                              <p className="text-xs text-gray-500">{post.timestamp}</p>
+                              <h4 className="text-sm font-bold text-gray-900">{post.author.name}</h4>
+                              <p className="text-sm text-gray-600 font-medium">{post.author.title} · {post.author.company}</p>
+                              <p className="text-xs text-gray-500 mt-0.5 flex items-center">
+                                <CalendarIcon className="w-3 h-3 mr-1" />
+                                {post.timestamp}
+                              </p>
                             </div>
                           </div>
-                          <button className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors">
-                            <MoreHorizontalIcon className="h-5 w-5" />
-                          </button>
+                          <div className="relative dropdown-menu-container">
+                            <button
+                              onClick={() => setOpenMenuId(openMenuId === post.id ? null : post.id)}
+                              className="p-2 text-gray-400 hover:text-gray-700 hover:bg-white/60 rounded-xl transition-all"
+                            >
+                              <MoreHorizontalIcon className="h-5 w-5" />
+                            </button>
+                            
+                            {/* 下拉菜单 - 只对作者显示编辑和删除 */}
+                            {openMenuId === post.id && post.authorId === user?.id && (
+                              <div className="absolute right-0 top-full mt-2 w-40 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-50">
+                                <button
+                                  onClick={() => {
+                                    handleEdit(post);
+                                    setOpenMenuId(null);
+                                  }}
+                                  className="w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-50 flex items-center space-x-2 transition-colors"
+                                >
+                                  <EditIcon className="w-4 h-4 text-blue-500" />
+                                  <span>编辑</span>
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setDeletingPostId(post.id);
+                                    setOpenMenuId(null);
+                                  }}
+                                  className="w-full px-4 py-2 text-left text-red-600 hover:bg-red-50 flex items-center space-x-2 transition-colors"
+                                >
+                                  <TrashIcon className="w-4 h-4" />
+                                  <span>删除</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
 
                       {/* Post content */}
-                      <div className="px-6 pb-4">
-                        <p className="text-gray-800">{post.content}</p>
+                      <div className="px-6 py-5">
+                        <p className="text-gray-800 leading-relaxed font-medium">{post.content}</p>
 
                         {/* 根据内容类型显示不同的媒体内容 */}
                         {post.contentType === 'image' && post.mediaUrl && (
-                          <div className="mt-4">
+                          <div className="mt-5">
                             <div
-                              className="rounded-xl overflow-hidden cursor-pointer hover:opacity-90 transition-opacity"
-                              onClick={() => openImageModal(post.mediaUrl, post.title)}
+                              className="rounded-2xl overflow-hidden cursor-pointer hover:scale-[1.02] transition-transform duration-300 shadow-lg hover:shadow-xl"
+                              onClick={() => openImageModal(post.mediaUrl || '', post.title || '分享的图片')}
                             >
                               <img
                                 src={post.mediaUrl}
@@ -464,27 +830,41 @@ const Home = () => {
                           </div>
                         )}
 
+                        {post.contentType === 'video' && post.mediaUrl && (
+                          <div className="mt-5">
+                            <div className="rounded-2xl overflow-hidden shadow-lg hover:shadow-xl">
+                              <video
+                                src={post.mediaUrl}
+                                controls
+                                className="w-full h-80 object-cover"
+                              />
+                            </div>
+                          </div>
+                        )}
+
                         {post.contentType === 'article' && (
                           <div
-                            className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-200 cursor-pointer hover:shadow-md transition-shadow"
-                            onClick={() => navigate(`/articles/${post.id}`)}
+                            className="mt-5 p-5 bg-gradient-to-br from-green-50/50 to-emerald-50/30 rounded-2xl border border-green-100/60 cursor-pointer hover:shadow-xl hover:scale-[1.01] transition-all duration-300 backdrop-blur-sm"
+                            onClick={() => {
+                              // 提取原始ID（如果是字符串格式如 "article-1"，提取数字部分）
+                              let articleId = post.originalId;
+                              if (!articleId && typeof post.id === 'string' && post.id.startsWith('article-')) {
+                                articleId = parseInt(post.id.replace('article-', ''));
+                              } else if (!articleId) {
+                                articleId = typeof post.id === 'number' ? post.id : parseInt(String(post.id));
+                              }
+                              navigate(`/articles/${articleId}`);
+                            }}
                           >
                             <div className="flex items-center">
-                              <svg className="w-8 h-8 text-green-500 mr-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
-                              </svg>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-semibold text-gray-900 truncate">{post.title}</p>
-                                <p className="text-xs text-gray-500 mt-1">{post.description || '文章摘要'}</p>
-                                <div className="flex items-center mt-2 text-xs text-gray-500">
-                                  <span>{post.readTime || '3分钟'}阅读</span>
-                                  <span className="mx-2">•</span>
-                                  <span>{post.claps || 0} 次点赞</span>
-                                  <span className="mx-2">•</span>
-                                  <span>{post.comments} 条评论</span>
-                                </div>
+                              <div className="p-3 bg-green-100/50 rounded-xl mr-4">
+                                <FileTextIcon className="w-6 h-6 text-green-600" />
                               </div>
-                              <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-bold text-gray-900 truncate mb-1">{post.title}</p>
+                                <p className="text-xs text-gray-600 line-clamp-2">{post.description || '文章摘要'}</p>
+                              </div>
+                              <svg className="w-5 h-5 text-green-400 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                               </svg>
                             </div>
@@ -492,38 +872,48 @@ const Home = () => {
                         )}
 
                         {post.contentType === 'file' && (
-                          <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                          <div className="mt-5 p-5 bg-gradient-to-br from-blue-50/50 to-indigo-50/30 rounded-2xl border border-blue-100/60 backdrop-blur-sm">
                             <div className="flex items-center">
-                              <FileTextIcon className="h-8 w-8 text-blue-500 mr-3" />
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-gray-900 truncate">{post.title || post.originalName}</p>
-                                <p className="text-xs text-gray-500">{post.mimeType || '文件'}</p>
-                                <p className="text-xs text-gray-500">{(post.size / 1024).toFixed(1)} KB</p>
+                              <div className="p-3 bg-blue-100/50 rounded-xl mr-4">
+                                <FileTextIcon className="h-6 w-6 text-blue-600" />
                               </div>
-                              <a
-                                href={`/api/files/download/${post.id}`}
-                                className="text-blue-600 hover:text-blue-800 text-sm"
-                                target="_blank"
-                                rel="noopener noreferrer"
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-bold text-gray-900 truncate mb-1">{post.title || post.originalName}</p>
+                                <p className="text-xs text-gray-600 mb-1">{post.mimeType || '文件'}</p>
+                                <p className="text-xs text-gray-500">{post.size ? `${(post.size / 1024).toFixed(1)} KB` : '未知大小'}</p>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  // 如果文件有 fileUrl，直接使用 TOS URL 下载
+                                  if (post.mediaUrl) {
+                                    window.open(post.mediaUrl, '_blank');
+                                  } else {
+                                    // 否则跳转到文件详情页
+                                    navigate(`/files/${post.originalId || post.id}`);
+                                  }
+                                }}
+                                className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded-xl hover:from-blue-600 hover:to-indigo-600 text-sm font-semibold shadow-sm hover:shadow-md transition-all"
                               >
                                 下载
-                              </a>
+                              </button>
                             </div>
                           </div>
                         )}
 
                         {!post.contentType && post.originalName && (
-                          <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                          <div className="mt-5 p-5 bg-gradient-to-br from-blue-50/50 to-indigo-50/30 rounded-2xl border border-blue-100/60 backdrop-blur-sm">
                             <div className="flex items-center">
-                              <FileTextIcon className="h-8 w-8 text-blue-500 mr-3" />
+                              <div className="p-3 bg-blue-100/50 rounded-xl mr-4">
+                                <FileTextIcon className="h-6 w-6 text-blue-600" />
+                              </div>
                               <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-gray-900 truncate">{post.title || post.originalName}</p>
-                                <p className="text-xs text-gray-500">{post.mimeType || '文件'}</p>
-                                <p className="text-xs text-gray-500">{(post.size / 1024).toFixed(1)} KB</p>
+                                <p className="text-sm font-bold text-gray-900 truncate mb-1">{post.title || post.originalName}</p>
+                                <p className="text-xs text-gray-600 mb-1">{post.mimeType || '文件'}</p>
+                                <p className="text-xs text-gray-500">{post.size ? `${(post.size / 1024).toFixed(1)} KB` : '未知大小'}</p>
                               </div>
                               <a
-                                href={`/api/files/download/${post.id}`}
-                                className="text-blue-600 hover:text-blue-800 text-sm"
+                                href={`/api/files/download/${post.originalId || post.id}`}
+                                className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded-xl hover:from-blue-600 hover:to-indigo-600 text-sm font-semibold shadow-sm hover:shadow-md transition-all"
                                 target="_blank"
                                 rel="noopener noreferrer"
                               >
@@ -535,25 +925,27 @@ const Home = () => {
                       </div>
 
                       {/* Post actions */}
-                      <div className="px-6 py-4 border-t border-gray-200">
+                      <div className="px-6 py-4 border-t border-blue-100/50 bg-gradient-to-r from-blue-50/20 to-purple-50/10">
                         <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-6">
+                          <div className="flex items-center space-x-4">
                             <button
                               onClick={() => handleLike(post.id)}
-                              className={`flex items-center space-x-2 ${
-                                post.liked ? 'text-red-600' : 'text-gray-600 hover:text-red-600'
-                              } transition-colors`}
+                              className={`flex items-center space-x-2 px-4 py-2 rounded-xl transition-all ${
+                                post.liked 
+                                  ? 'text-red-600 bg-red-50/50 hover:bg-red-100/50' 
+                                  : 'text-gray-600 hover:text-red-600 hover:bg-red-50/30'
+                              }`}
                             >
                               <HeartIcon className={`h-5 w-5 ${post.liked ? 'fill-current' : ''}`} />
-                              <span className="text-sm font-medium">{post.likes}</span>
+                              <span className="text-sm font-semibold">{post.likes}</span>
                             </button>
-                            <button className="flex items-center space-x-2 text-gray-600 hover:text-blue-600 transition-colors">
+                            <button className="flex items-center space-x-2 px-4 py-2 rounded-xl text-gray-600 hover:text-blue-600 hover:bg-blue-50/30 transition-all">
                               <MessageCircleIcon className="h-5 w-5" />
-                              <span className="text-sm font-medium">{post.comments}</span>
+                              <span className="text-sm font-semibold">{post.comments}</span>
                             </button>
-                            <button className="flex items-center space-x-2 text-gray-600 hover:text-green-600 transition-colors">
+                            <button className="flex items-center space-x-2 px-4 py-2 rounded-xl text-gray-600 hover:text-green-600 hover:bg-green-50/30 transition-all">
                               <ShareIcon className="h-5 w-5" />
-                              <span className="text-sm font-medium">{post.shares}</span>
+                              <span className="text-sm font-semibold">{post.shares}</span>
                             </button>
                           </div>
                         </div>
@@ -576,52 +968,172 @@ const Home = () => {
               </>
             )}
 
-            {/* 帖子创建弹窗 */}
+            {/* 删除确认对话框 */}
+            {deletingPostId && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                <div className="bg-white rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl">
+                  <h3 className="text-lg font-bold text-gray-900 mb-4">确认删除</h3>
+                  <p className="text-gray-600 mb-6">确定要删除这条动态吗？此操作无法撤销。</p>
+                  <div className="flex justify-end space-x-3">
+                    <button
+                      onClick={() => setDeletingPostId(null)}
+                      className="px-4 py-2 text-gray-600 hover:text-gray-800 rounded-lg transition-colors"
+                    >
+                      取消
+                    </button>
+                    <button
+                      onClick={() => handleDelete(deletingPostId)}
+                      className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                    >
+                      删除
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 帖子创建/编辑弹窗 */}
             <PostCreationModal
               isOpen={isPostModalOpen}
-              onClose={() => setIsPostModalOpen(false)}
+              onClose={() => {
+                setIsPostModalOpen(false);
+                setEditingPost(null);
+              }}
+              editingPost={editingPost}
+              mediaType={postModalMediaType}
               onPost={async (postData) => {
-                // 这里需要实现实际的帖子发布逻辑
-                // 目前只是模拟发布，实际应用中需要调用API
-                console.log('发布帖子:', postData);
-
-                // 如果有图片，可能需要调用上传文件API
-                if (postData.image) {
-                  try {
-                    const result = await addFile({
-                      file: postData.image,
-                      title: postData.content.substring(0, 50) || '分享的图片',
-                      description: postData.content,
-                      visibility: postData.visibility
+                try {
+                  let result: any;
+                  
+                  if (editingPost && editingPost.originalId) {
+                    // 编辑模式
+                    result = await updatePost(editingPost.originalId, {
+                      content: postData.content || undefined,
+                      image: postData.image,
+                      video: postData.video,
+                      visibility: (postData.visibility || 'public') as 'public' | 'followers' | 'private'
                     });
-                    console.log('文件上传成功:', result);
-                  } catch (error) {
-                    console.error('文件上传失败:', error);
+                  } else {
+                    // 创建模式
+                    result = await createPost({
+                      content: postData.content || undefined,
+                      image: postData.image,
+                      video: postData.video,
+                      visibility: (postData.visibility || 'public') as 'public' | 'followers' | 'private'
+                    });
                   }
-                } else {
-                  // 纯文本帖子，可以考虑调用专门的帖子API（如果有的话）
-                  console.log('纯文本帖子发布:', postData);
+                  
+                  console.log('帖子操作响应:', result);
+                  
+                  if (result?.code === 0) {
+                    const mediaType = postData.video ? '视频' : (postData.image ? '照片' : '帖子');
+                    setSuccessMessage(editingPost ? '帖子更新成功！' : `${mediaType}发布成功！`);
+                    setShowSuccessMessage(true);
+                    setTimeout(() => setShowSuccessMessage(false), 3000);
+                    
+                    // 关闭弹窗
+                    setIsPostModalOpen(false);
+                    setEditingPost(null);
+                    
+                    // 重置标志，允许重新获取数据
+                    hasFetchedData.current = false;
+                    
+                    // 延迟重新加载数据
+                    setTimeout(async () => {
+                      try {
+                        await fetchHomeData();
+                      } catch (fetchError: any) {
+                        console.error('刷新数据失败:', fetchError);
+                        setError('刷新数据失败，请手动刷新页面');
+                        setTimeout(() => setError(null), 5000);
+                      }
+                    }, 500);
+                  } else {
+                    setError(result?.msg || result?.error || (editingPost ? '更新失败，请重试' : '发布失败，请重试'));
+                    setTimeout(() => setError(null), 5000);
+                  }
+                } catch (error: any) {
+                  console.error('操作失败:', error);
+                  setError(error.message || (editingPost ? '更新失败，请重试' : '发布失败，请重试'));
+                  setTimeout(() => setError(null), 5000);
                 }
-
-                // 重新加载数据以显示新帖子
-                fetchHomeData();
               }}
             />
 
-            {/* 文章创建弹窗 */}
+            {/* 文章创建/编辑弹窗 */}
             <ArticleCreationModal
               isOpen={isArticleModalOpen}
-              onClose={() => setIsArticleModalOpen(false)}
+              onClose={() => {
+                setIsArticleModalOpen(false);
+                setEditingPost(null);
+              }}
+              editingArticle={editingPost}
               onPost={async (postData) => {
-                // 这里需要实现实际的文章发布逻辑
-                // 目前只是模拟发布，实际应用中需要调用API
-                console.log('发布文章:', postData);
-
-                // 实际应用中，这里应该调用创建文章的API
-                // await createArticleAPI(postData);
-
-                // 重新加载数据以显示新文章
-                fetchHomeData();
+                try {
+                  let result: any;
+                  
+                  if (editingPost && editingPost.originalId) {
+                    // 编辑模式
+                    result = await updateArticle(editingPost.originalId, {
+                      title: postData.title,
+                      summary: postData.summary || undefined,
+                      content: postData.content,
+                      visibility: (postData.visibility || 'public') as 'public' | 'followers' | 'private'
+                    });
+                  } else {
+                    // 创建模式
+                    result = await createArticle({
+                      title: postData.title,
+                      summary: postData.summary || undefined,
+                      content: postData.content,
+                      visibility: (postData.visibility || 'public') as 'public' | 'followers' | 'private'
+                    });
+                  }
+                  
+                  console.log('文章操作响应:', result);
+                  
+                  if (result?.code === 0) {
+                    setSuccessMessage(editingPost ? '文章更新成功！' : '文章发布成功！');
+                    setShowSuccessMessage(true);
+                    setTimeout(() => setShowSuccessMessage(false), 3000);
+                    
+                    // 关闭弹窗
+                    setIsArticleModalOpen(false);
+                    setEditingPost(null);
+                    
+                    // 重置标志，允许重新获取数据
+                    hasFetchedData.current = false;
+                    
+                    // 延迟重新加载数据
+                    setTimeout(async () => {
+                      try {
+                        await fetchHomeData();
+                      } catch (fetchError: any) {
+                        console.error('刷新数据失败:', fetchError);
+                        setError('刷新数据失败，请手动刷新页面');
+                        setTimeout(() => setError(null), 5000);
+                      }
+                    }, 500);
+                  } else {
+                    setError(result?.msg || result?.error || (editingPost ? '更新失败，请重试' : '发布文章失败，请重试'));
+                    setTimeout(() => setError(null), 5000);
+                  }
+                } catch (error: any) {
+                  console.error('操作失败:', error);
+                  
+                  if (error.response?.status === 401) {
+                    setError('登录已过期，请重新登录');
+                    setTimeout(() => {
+                      localStorage.removeItem('token');
+                      localStorage.removeItem('refreshToken');
+                      localStorage.removeItem('user');
+                      window.location.href = '/login';
+                    }, 2000);
+                  } else {
+                    setError(error.message || (editingPost ? '更新失败，请重试' : '发布文章失败，请重试'));
+                    setTimeout(() => setError(null), 5000);
+                  }
+                }
               }}
             />
 

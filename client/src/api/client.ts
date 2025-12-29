@@ -29,7 +29,7 @@ api.interceptors.request.use(
 // 响应拦截器 - 处理错误和token过期
 api.interceptors.response.use(
   (response) => {
-    console.log('响应拦截器收到响应:', response);
+    // 所有2xx状态码都是成功响应，直接返回
     // 检查响应格式并返回适当的数据
     if (response.data && typeof response.data === 'object') {
       // 如果后端返回的是 { code, data, msg } 格式，则返回实际数据
@@ -37,17 +37,35 @@ api.interceptors.response.use(
         return response.data; // 返回整个响应对象，让调用方处理
       }
     }
+    // 如果没有code和data字段，直接返回响应数据
     return response.data;
   },
   async (error) => {
+    // 如果没有响应对象，可能是网络错误，不要跳转登录页
+    if (!error.response) {
+      const errorMessage = error.message || '网络错误，请检查网络连接';
+      return Promise.reject(new Error(errorMessage));
+    }
+
     const originalRequest = error.config;
+    const status = error.response?.status;
 
     // 处理401未授权错误
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (status === 401 && originalRequest && !originalRequest._retry) {
       originalRequest._retry = true; // 防止无限重试
 
+      // 如果是刷新token的请求本身返回401，直接跳转登录页
+      if (originalRequest.url?.includes('/auth/refresh')) {
+        console.error('刷新token失败，需要重新登录');
+        localStorage.removeItem('token');
+        localStorage.removeItem('refreshToken');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+        return Promise.reject(error);
+      }
+
       try {
-        // 使用统ken 方法
+        // 使用refreshToken方法
         const refreshResult = await refreshTokenApi();
         const token = refreshResult.data?.token;
         if (token) {
@@ -59,15 +77,18 @@ api.interceptors.response.use(
         console.error('令牌刷新失败:', refreshError);
       }
 
-      // 如果刷新失败或没有刷新令牌，清除本地存储并重定向到登录页
+      // 如果刷新失败，清除本地存储并重定向到登录页
+      console.error('认证失败，跳转登录页');
       localStorage.removeItem('token');
       localStorage.removeItem('refreshToken');
       localStorage.removeItem('user');
       window.location.href = '/login';
+      return Promise.reject(error);
     }
 
-    // 提取错误信息
-    return Promise.reject(new Error(error.response?.data?.error || error.message || '请求失败'));
+    // 提取错误信息（非401错误不跳转登录页）
+    const errorMessage = error.response?.data?.error || error.response?.data?.msg || error.message || '请求失败';
+    return Promise.reject(new Error(errorMessage));
   }
 );
 

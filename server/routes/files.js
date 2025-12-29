@@ -1,8 +1,9 @@
 import express from 'express';
 import { getFileCategory } from '../utils/upload.js';
 import { deleteFromTOS } from '../utils/tos.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, optionalAuth } from '../middleware/auth.js';
 import { getMySQLPool } from '../config/database.js';
+import { getPublicFiles, getFileById } from '../services/fileService.js';
 
 const router = express.Router();
 
@@ -152,6 +153,117 @@ router.delete('/:fileId', authenticateToken, async (req, res) => {
     console.error('删除文件错误:', error);
     res.status(500).json({
       error: '删除文件失败'
+    });
+  }
+});
+
+/**
+ * @route   GET /api/files/public
+ * @desc    获取所有公开文件列表（包括当前用户的非公开文件）
+ * @access  Public (可选认证)
+ */
+router.get('/public', optionalAuth, async (req, res) => {
+  try {
+    const { page = 1, limit = 20, category } = req.query;
+    const currentUserId = req.user?.id;
+
+    // 如果用户已登录，获取所有公开文件 + 当前用户的非公开文件
+    // 如果用户未登录，只获取公开文件
+    const result = await getPublicFiles({
+      page: parseInt(page),
+      limit: parseInt(limit),
+      category,
+      currentUserId // 传递当前用户ID，用于显示自己的非公开文件
+    });
+
+    res.json({
+      code: 0,
+      data: result,
+      msg: '获取成功'
+    });
+  } catch (error) {
+    console.error('获取公开文件列表错误:', error);
+    res.status(500).json({
+      code: 1,
+      data: null,
+      msg: '获取文件列表失败: ' + error.message
+    });
+  }
+});
+
+/**
+ * @route   GET /api/files/:fileId
+ * @desc    获取单个文件详情
+ * @access  Public (可选认证)
+ */
+router.get('/:fileId', optionalAuth, async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    const currentUserId = req.user?.id;
+    const pool = getMySQLPool();
+
+    const file = await getFileById(parseInt(fileId));
+
+    if (!file) {
+      return res.status(404).json({
+        code: 404,
+        data: null,
+        msg: '文件不存在'
+      });
+    }
+
+    // 检查文件权限
+    // 如果文件是私有的，只有作者本人可以查看
+    if (file.visibility === 'private' && (!currentUserId || currentUserId !== file.user_id)) {
+      return res.status(403).json({
+        code: 403,
+        data: null,
+        msg: '无权访问此文件'
+      });
+    }
+
+    // 如果文件是仅关注者可见，需要检查当前用户是否关注了作者
+    if (file.visibility === 'followers' && currentUserId && currentUserId !== file.user_id) {
+      const [follows] = await pool.execute(
+        'SELECT id FROM follows WHERE follower_id = ? AND following_id = ?',
+        [currentUserId, file.user_id]
+      );
+      if (follows.length === 0) {
+        return res.status(403).json({
+          code: 403,
+          data: null,
+          msg: '无权访问此文件'
+        });
+      }
+    }
+
+    // 检查当前用户是否已点赞
+    let liked = false;
+    if (currentUserId) {
+      const [likes] = await pool.execute(
+        'SELECT id FROM file_likes WHERE file_id = ? AND user_id = ?',
+        [fileId, currentUserId]
+      );
+      liked = likes.length > 0;
+    }
+
+    res.json({
+      code: 0,
+      data: {
+        file: {
+          ...file,
+          liked,
+          avatar: file.avatar || null
+        }
+      },
+      msg: '获取成功'
+    });
+  } catch (error) {
+    console.error('获取文件详情错误:', error);
+    res.status(500).json({
+      code: 500,
+      data: null,
+      msg: '获取文件详情失败: ' + error.message
     });
   }
 });

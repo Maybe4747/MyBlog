@@ -160,7 +160,7 @@ npm run dev
 npm start
 ```
 
-服务器将在 `http://localhost:3001` 启动
+服务器将在 `http://localhost:3000` 启动
 
 ## API文档
 
@@ -259,7 +259,7 @@ npm start
 
 ```env
 NODE_ENV=production
-PORT=3001
+PORT=3000
 JWT_SECRET=your_strong_secret_key
 # 其他数据库连接信息...
 ```
@@ -279,7 +279,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install
 COPY . .
-EXPOSE 3001
+EXPOSE 3000
 CMD ["npm", "start"]
 ```
 

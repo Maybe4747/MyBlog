@@ -10,7 +10,7 @@ export const initSocket = (token) => {
     return socket;
   }
 
-  socket = io('http://localhost:3001', {
+  socket = io('http://localhost:3000', {
     auth: {
       token
     },

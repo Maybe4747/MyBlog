@@ -20,6 +20,8 @@ import messageRoutes from './routes/messages.js';
 import searchRoutes from './routes/search.js';
 import notificationRoutes from './routes/notifications.js';
 import activityRoutes from './routes/activity.js';
+import postRoutes from './routes/posts.js';
+import articleRoutes from './routes/articles.js';
 
 // 创建Express应用
 const app = express();
@@ -30,8 +32,9 @@ app.use(helmet({
 }));
 app.use(compression());
 app.use(morgan('combined'));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// 增加请求体大小限制以支持大文件上传
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 app.use(cookieParser());
 
 // CORS配置
@@ -74,7 +77,7 @@ const limiter = rateLimit({
 // 为认证相关的API路径使用更严格的限流（防止暴力破解）
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15分钟
-  max: 20, // 认证相关的请求限制更严格，防止暴力破解
+  max: 100, // 认证相关的请求限制更严格，防止暴力破解
   message: {
     error: '请求过于频繁，请稍后再试'
   },
@@ -107,6 +110,8 @@ app.use('/api/messages', messageRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/activity', activityRoutes);
+app.use('/api/posts', postRoutes);
+app.use('/api/articles', articleRoutes);
 
 // 健康检查接口
 app.get('/health', (req, res) => {

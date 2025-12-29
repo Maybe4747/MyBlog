@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { UserIcon, BriefcaseIcon, MapPinIcon, LinkIcon, CalendarIcon, HeartIcon, MessageCircleIcon, MoreHorizontalIcon, FileIcon, DownloadIcon, UsersIcon, UserCheckIcon, MessageSquareIcon, FileTextIcon, ImageIcon, GraduationCapIcon, PlusIcon, Edit3Icon, Trash2Icon, CameraIcon, Building2Icon } from 'lucide-react';
-import { getUserProfile, getUserActivity } from '../../api/users';
+import { getUserProfile, getUserActivity, getPublicFiles } from '../../api/users';
 import { updateProfile } from '../../api/profiles';
 import api from '../../api/client';
 import { followUser, unfollowUser, getFollowers, getFollowing } from '../../api/social';
@@ -295,6 +295,7 @@ const Profile = () => {
   const [userActivity, setUserActivity] = useState<any[]>([]);
   const [filesLoading, setFilesLoading] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<string>('files');
+  const hasFetchedFiles = useRef(false);
 
   // 社交相关状态
   const [followers, setFollowers] = useState<any[]>([]);
@@ -339,20 +340,123 @@ const Profile = () => {
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState<boolean>(false);
 
-  // 获取用户活动流
+  // 获取用户活动流（包括文件）
   const fetchUserActivity = useCallback(async (): Promise<void> => {
-    if (!username) return;
+    console.log('fetchUserActivity: 函数被调用', { username, hasProfileData: !!profileData });
+    
+    if (!username || !profileData) {
+      console.log('fetchUserActivity: 缺少 username 或 profileData，跳过请求', { username, profileData });
+      return;
+    }
 
     try {
+      console.log('fetchUserActivity: 设置 loading 状态');
       setFilesLoading(true);
-      const response = await getUserActivity(username);
-      setUserActivity(response.data?.data?.activities || response.data?.activities || []);
+      
+      // 判断是否是自己的档案
+      const isOwn = currentUser && currentUser.username === username;
+      
+      // 尝试多种方式获取 userId
+      // 注意：getUserByUsername 返回的 user 对象可能没有 id 字段，需要从后端获取
+      // 如果 profileData 没有 id，我们需要通过 username 来查询文件
+      let userId = profileData.id || profileData.userId || profileData.user_id;
+      
+      console.log('fetchUserActivity: 检查 userId', { 
+        profileData,
+        id: profileData.id,
+        userId: profileData.userId,
+        user_id: profileData.user_id,
+        username: profileData.username,
+        finalUserId: userId,
+        isOwn
+      });
+      
+      // 如果没有 userId，但如果是查看自己的档案，可以使用 currentUser.id
+      if (!userId && isOwn && currentUser?.id) {
+        userId = currentUser.id;
+        console.log('fetchUserActivity: 使用 currentUser.id', { userId });
+      }
+      
+      // 如果还是没有 userId，我们需要从后端获取用户ID
+      // 但为了简化，我们先尝试使用 username 来过滤
+      if (!userId) {
+        console.warn('fetchUserActivity: 缺少 userId，但继续尝试通过 username 过滤', { 
+          profileData,
+          username 
+        });
+        // 不返回，继续执行，通过 username 来过滤
+      }
+      
+      console.log('fetchUserActivity: 开始获取文件', { username, userId, isOwn });
+      console.log('fetchUserActivity: 调用 getPublicFiles API', { limit: 50 });
+      
+      // 后端会自动从认证 token 获取 currentUserId，所以不需要传递
+      // 如果查看自己的档案，后端会返回所有自己的文件（包括非公开的）
+      // 如果查看别人的档案，后端只返回公开文件
+      const response: any = await getPublicFiles({ 
+        limit: 50
+      });
+      
+      console.log('fetchUserActivity: getPublicFiles API 调用完成', { 
+        hasResponse: !!response,
+        response 
+      });
+      
+      console.log('fetchUserActivity: API 响应', { 
+        code: response?.code, 
+        filesCount: response?.data?.files?.length,
+        files: response?.data?.files 
+      });
+      
+      if (response?.code === 0 && response?.data?.files) {
+        // 如果是查看自己的档案，显示所有文件（包括非公开的）
+        // 如果是查看别人的档案，只显示该用户的公开文件
+        const files = response.data.files.filter((file: any) => {
+          if (isOwn) {
+            // 自己的档案：显示所有自己的文件（包括 public、followers、private）
+            return file.user_id === userId;
+          } else {
+            // 别人的档案：只显示该用户的公开文件
+            return file.user_id === userId && file.visibility === 'public';
+          }
+        });
+        
+        console.log('fetchUserActivity: 过滤后的文件', { 
+          totalFiles: response.data.files.length,
+          filteredFiles: files.length,
+          files 
+        });
+        
+        // 转换为活动格式
+        const activities = files.map((file: any) => ({
+          id: file.id,
+          type: 'file_upload',
+          title: file.title,
+          description: file.description,
+          originalName: file.original_name,
+          size: file.size,
+          mimeType: file.mime_type,
+          fileUrl: file.file_url,
+          uploadedAt: file.uploaded_at,
+          visibility: file.visibility,
+          likeCount: file.likeCount || 0,
+          commentCount: file.commentCount || 0,
+          downloadCount: file.download_count || 0
+        }));
+        
+        console.log('fetchUserActivity: 设置活动列表', { activitiesCount: activities.length });
+        setUserActivity(activities);
+      } else {
+        console.log('fetchUserActivity: API 返回错误或空数据', response);
+        setUserActivity([]);
+      }
     } catch (err: any) {
       console.error('获取用户活动流失败:', err);
+      setUserActivity([]);
     } finally {
       setFilesLoading(false);
     }
-  }, [username]);
+  }, [username, profileData, currentUser]);
 
   // 获取工作经历和教育经历
   const fetchExperiencesAndEducations = useCallback(async () => {
@@ -378,24 +482,58 @@ const Profile = () => {
 
   useEffect(() => {
     const fetchProfile = async () => {
-      if (!username) return;
+      if (!username) {
+        console.log('fetchProfile: 缺少 username，跳过请求');
+        return;
+      }
 
+      console.log('fetchProfile: 开始获取用户档案', { username });
+      
       try {
         setLoading(true);
+        console.log('fetchProfile: 调用 getUserProfile API', { username });
         const response = await getUserProfile(username);
+        console.log('fetchProfile: API 响应', { 
+          status: response.status,
+          data: response.data,
+          fullResponse: response 
+        });
+        
         const userData = response.data?.data?.user || response.data?.user;
-        setProfileData(userData);
+        const stats = response.data?.data?.stats || response.data?.stats || {};
+        
+        console.log('fetchProfile: 解析后的数据', { 
+          userData, 
+          stats, 
+          hasUserData: !!userData,
+          hasStats: !!stats
+        });
+        
+        // 合并用户数据和统计数据
+        const profileDataWithStats = {
+          ...userData,
+          stats: {
+            files: stats.files || 0,
+            followers: stats.followers || 0,
+            following: stats.following || 0,
+            views: stats.views || 0
+          }
+        };
+        
+        console.log('fetchProfile: 设置 profileData', { profileDataWithStats });
+        setProfileData(profileDataWithStats);
         setIsFollowing(userData.isFollowing || false);
 
-        // 如果是自己的资料页面，获取活动流、工作经历和教育经历
+        // 如果是自己的资料页面，获取工作经历和教育经历
         if (currentUser && currentUser.username === username) {
-          await fetchUserActivity();
           await fetchExperiencesAndEducations();
         } else {
           // 查看他人档案时，清空工作经历和教育经历
           setExperiences([]);
           setEducations([]);
         }
+        
+        // 获取活动流（文件和文章）- 在 profileData 设置后，useEffect 会自动触发
       } catch (err: any) {
         setError(err.message || '获取用户资料失败');
       } finally {
@@ -404,7 +542,7 @@ const Profile = () => {
     };
 
     fetchProfile();
-  }, [username, currentUser, fetchUserActivity, fetchExperiencesAndEducations]);
+  }, [username, currentUser?.username]);
 
   // 初始化编辑数据
   useEffect(() => {
@@ -419,6 +557,19 @@ const Profile = () => {
       setCurrentSkills(profileData.skills ? [...profileData.skills] : []);
     }
   }, [profileData]);
+  
+  // 当 profileData 更新时，重新获取活动流（文件列表）
+  useEffect(() => {
+    if (profileData && profileData.id && !hasFetchedFiles.current) {
+      hasFetchedFiles.current = true;
+      fetchUserActivity();
+    }
+  }, [profileData?.id, username, fetchUserActivity]);
+  
+  // 当 username 变化时，重置标志
+  useEffect(() => {
+    hasFetchedFiles.current = false;
+  }, [username]);
 
   // 工作经历相关函数
   const handleAddExperience = useCallback(async (experienceData) => {
@@ -841,6 +992,9 @@ const Profile = () => {
     setIsEditingSkills(false);
   }, [profileData]);
 
+  // 计算是否是自己的档案（必须在所有条件返回之前）
+  const isOwnProfile = currentUser && currentUser.username === username;
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -874,8 +1028,6 @@ const Profile = () => {
       </div>
     );
   }
-
-  const isOwnProfile = currentUser && currentUser.username === username;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1605,11 +1757,25 @@ const Profile = () => {
                               <FileIcon className="h-8 w-8 text-blue-500" />
                             </div>
                             <div className="ml-3 flex-1">
-                              <h4 className="text-sm font-medium text-gray-900 truncate">{activity.title || activity.originalName}</h4>
+                              <div className="flex items-center justify-between mb-1">
+                                <h4 className="text-sm font-medium text-gray-900 truncate flex-1">{activity.title || activity.originalName}</h4>
+                                {/* 权限标签 */}
+                                {activity.visibility && (
+                                  <span className={`ml-2 px-2 py-0.5 rounded-full text-xs font-medium ${
+                                    activity.visibility === 'public' 
+                                      ? 'bg-green-100 text-green-700 border border-green-200' 
+                                      : activity.visibility === 'followers'
+                                      ? 'bg-blue-100 text-blue-700 border border-blue-200'
+                                      : 'bg-gray-100 text-gray-700 border border-gray-200'
+                                  }`}>
+                                    {activity.visibility === 'public' ? '公开' : activity.visibility === 'followers' ? '仅关注者' : '私有'}
+                                  </span>
+                                )}
+                              </div>
                               <p className="text-xs text-gray-500">{activity.originalName}</p>
                               <div className="mt-2 flex items-center justify-between">
                                 <span className="text-xs text-gray-500">{(activity.size / 1024).toFixed(1)} KB</span>
-                                <span className="text-xs text-gray-500">{activity.visibility}</span>
+                                <span className="text-xs text-gray-500">{activity.mimeType || '未知类型'}</span>
                               </div>
                             </div>
                           </div>

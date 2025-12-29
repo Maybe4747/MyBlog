@@ -11,58 +11,144 @@ const router = express.Router();
  */
 router.get('/users', optionalAuth, async (req, res) => {
   try {
-    const { q: query, page = 1, limit = 20 } = req.query;
+    const { q: query = '', page = 1, limit = 20 } = req.query;
+    const pool = getMySQLPool();
+    const limitNum = parseInt(limit) || 20;
+    const pageNum = parseInt(page) || 1;
+    const offsetNum = (pageNum - 1) * limitNum;
 
-    if (!query) {
-      return res.status(400).json({
-        error: '请提供搜索关键词'
+    // 处理查询字符串（可能是字符串或数字）
+    const queryStr = String(query || '').trim();
+    const queryLower = queryStr.toLowerCase();
+
+    // 如果查询为空或为 'default'，返回推荐用户（按创建时间倒序）
+    if (!queryStr || queryLower === 'default') {
+      // 确保参数是整数类型
+      const limitInt = Number(limitNum);
+      const offsetInt = Number(offsetNum);
+      
+      console.log('推荐用户查询参数:', {
+        limitNum,
+        offsetNum,
+        limitInt,
+        offsetInt,
+        limitType: typeof limitInt,
+        offsetType: typeof offsetInt
+      });
+
+      // 使用字符串插值处理 LIMIT 和 OFFSET，避免参数类型问题
+      const query = `
+        SELECT 
+          u.id, 
+          u.username, 
+          u.avatar, 
+          up.bio, 
+          up.location, 
+          up.website,
+          up.position,
+          up.company,
+          u.created_at
+        FROM users u
+        LEFT JOIN user_profiles up ON u.id = up.user_id
+        ORDER BY u.created_at DESC
+        LIMIT ${limitInt} OFFSET ${offsetInt}
+      `;
+
+      const [users] = await pool.execute(query);
+
+      // 获取总数
+      const [totalResult] = await pool.execute(
+        'SELECT COUNT(*) as total FROM users'
+      );
+      const total = totalResult[0]?.total || 0;
+
+      // 获取每个用户的技能，并移除内部的created_at字段（不对外暴露）
+      for (const user of users) {
+        const [skills] = await pool.execute(
+          'SELECT skill_name FROM user_skills WHERE user_id = ?',
+          [user.id]
+        );
+        user.skills = skills.map(skill => skill.skill_name);
+        // 删除内部的created_at字段，因为它仅用于排序
+        delete user.created_at;
+      }
+
+      return res.json({
+        code: 0,
+        data: {
+          users,
+          total,
+          page: pageNum,
+          limit: limitNum
+        },
+        msg: '获取推荐用户成功'
       });
     }
 
-    const pool = getMySQLPool();
+    // 有查询关键词时，进行搜索
+    const searchPattern = `%${queryStr}%`;
+    const searchParams = [];
 
-    // 构建搜索查询
-    const searchFields = ['u.username', 'up.bio', 'up.location', 'up.website'];
-    const searchConditions = [];
-    const params = [];
+    // 构建搜索条件（使用 COALESCE 处理 NULL 值，避免参数不匹配）
+    const searchQuery = `(
+      u.username LIKE ? OR
+      COALESCE(up.bio, '') LIKE ? OR
+      COALESCE(up.location, '') LIKE ? OR
+      COALESCE(up.website, '') LIKE ? OR
+      COALESCE(up.position, '') LIKE ? OR
+      COALESCE(up.company, '') LIKE ? OR
+      EXISTS (
+        SELECT 1 FROM user_skills us 
+        WHERE us.user_id = u.id AND us.skill_name LIKE ?
+      )
+    )`;
 
-    for (const field of searchFields) {
-      searchConditions.push(`${field} LIKE ?`);
-      params.push(`%${query}%`);
-    }
-
-    // 为技能单独查询
-    searchConditions.push(`us.skill_name LIKE ?`);
-    params.push(`%${query}%`);
-
-    const searchQuery = `(${searchConditions.join(' OR ')})`;
+    // 所有搜索条件使用相同的模式
+    searchParams.push(
+      searchPattern, // u.username
+      searchPattern, // up.bio
+      searchPattern, // up.location
+      searchPattern, // up.website
+      searchPattern, // up.position
+      searchPattern, // up.company
+      searchPattern  // user_skills.skill_name
+    );
 
     // 查询总数
     const countQuery = `
       SELECT COUNT(DISTINCT u.id) as total
       FROM users u
       LEFT JOIN user_profiles up ON u.id = up.user_id
-      LEFT JOIN user_skills us ON u.id = us.user_id
       WHERE ${searchQuery}
     `;
 
-    const [totalResult] = await pool.execute(countQuery, params);
-    const total = totalResult[0].total;
+    const [totalResult] = await pool.execute(countQuery, searchParams);
+    const total = totalResult[0]?.total || 0;
 
-    // 构建主查询，包含分页
+    // 确保分页参数是整数类型
+    const limitInt = Number(limitNum);
+    const offsetInt = Number(offsetNum);
+
+    // 使用字符串插值处理 LIMIT 和 OFFSET，避免参数类型问题
     const paginatedQuery = `
-      SELECT DISTINCT u.id, u.username, u.avatar, up.bio, up.location, up.website, u.created_at
+      SELECT DISTINCT 
+        u.id, 
+        u.username, 
+        u.avatar, 
+        up.bio, 
+        up.location, 
+        up.website,
+        up.position,
+        up.company,
+        u.created_at
       FROM users u
       LEFT JOIN user_profiles up ON u.id = up.user_id
-      LEFT JOIN user_skills us ON u.id = us.user_id
       WHERE ${searchQuery}
       ORDER BY u.created_at DESC
-      LIMIT ? OFFSET ?
+      LIMIT ${limitInt} OFFSET ${offsetInt}
     `;
 
-    const paginatedParams = [...params, parseInt(limit), (parseInt(page) - 1) * parseInt(limit)];
-
-    const [users] = await pool.execute(paginatedQuery, paginatedParams);
+    const [users] = await pool.execute(paginatedQuery, searchParams);
 
     // 获取每个用户的技能，并移除内部的created_at字段（不对外暴露）
     for (const user of users) {
@@ -71,22 +157,33 @@ router.get('/users', optionalAuth, async (req, res) => {
         [user.id]
       );
       user.skills = skills.map(skill => skill.skill_name);
-
       // 删除内部的created_at字段，因为它仅用于排序
       delete user.created_at;
     }
 
     res.json({
-      users,
-      total,
-      page: parseInt(page),
-      limit: parseInt(limit)
+      code: 0,
+      data: {
+        users,
+        total,
+        page: pageNum,
+        limit: limitNum
+      },
+      msg: '搜索成功'
     });
 
   } catch (error) {
-    console.error('搜索用户错误:', error);
+    console.error('搜索用户错误:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+      query: req.query
+    });
     res.status(500).json({
-      error: '搜索失败'
+      code: 500,
+      data: null,
+      error: '搜索失败',
+      msg: error.message || '搜索失败'
     });
   }
 });

@@ -66,17 +66,29 @@ export const getUserFiles = async (userId, options = {}) => {
 };
 
 /**
- * 获取公开文件列表
+ * 获取公开文件列表（包括当前用户的非公开文件）
  */
 export const getPublicFiles = async (options = {}) => {
   const pool = getMySQLPool();
-  const { page = 1, limit = 10, category, search } = options;
+  const { page = 1, limit = 10, category, search, currentUserId } = options;
   
-  let query = `SELECT f.*, u.username as owner_username
+  // 如果提供了 currentUserId，显示所有公开文件 + 当前用户的非公开文件
+  // 否则只显示公开文件
+  let visibilityCondition = "f.visibility = 'public'";
+  if (currentUserId) {
+    visibilityCondition = `(f.visibility = 'public' OR (f.visibility IN ('followers', 'private') AND f.user_id = ?))`;
+  }
+  
+  let query = `SELECT f.*, u.username as owner_username, u.avatar
                FROM user_files f
                JOIN users u ON f.user_id = u.id
-               WHERE f.visibility = 'public'`;
+               WHERE ${visibilityCondition}`;
   const params = [];
+  
+  // 如果提供了 currentUserId，将其作为第一个参数
+  if (currentUserId) {
+    params.push(currentUserId);
+  }
   
   if (category) {
     query += ' AND f.category = ?';
@@ -91,14 +103,46 @@ export const getPublicFiles = async (options = {}) => {
   
   query += ' ORDER BY f.uploaded_at DESC';
   
-  // 计算总数
-  const countQuery = query.replace('SELECT f.*, u.username as owner_username', 'SELECT COUNT(*) as count');
-  const [countResult] = await pool.execute(countQuery, params);
+  // 计算总数（使用单独的查询，避免字段冲突）
+  let countVisibilityCondition = "f.visibility = 'public'";
+  if (currentUserId) {
+    countVisibilityCondition = `(f.visibility = 'public' OR (f.visibility IN ('followers', 'private') AND f.user_id = ?))`;
+  }
+  
+  let countQuery = `SELECT COUNT(*) as count
+                    FROM user_files f
+                    JOIN users u ON f.user_id = u.id
+                    WHERE ${countVisibilityCondition}`;
+  const countParams = [];
+  
+  // 如果提供了 currentUserId，将其作为第一个参数
+  if (currentUserId) {
+    countParams.push(currentUserId);
+  }
+  
+  if (category) {
+    countQuery += ' AND f.category = ?';
+    countParams.push(category);
+  }
+  
+  if (search) {
+    countQuery += ` AND (f.title LIKE ? OR f.description LIKE ? OR f.original_name LIKE ?)`;
+    const searchParam = `%${search}%`;
+    countParams.push(searchParam, searchParam, searchParam);
+  }
+  
+  const [countResult] = await pool.execute(countQuery, countParams);
   const total = countResult[0].count;
   
-  // 添加分页
-  query += ' LIMIT ? OFFSET ?';
-  params.push(parseInt(limit), (parseInt(page) - 1) * parseInt(limit));
+  // 确保分页参数是整数类型
+  const limitNum = parseInt(limit) || 10;
+  const pageNum = parseInt(page) || 1;
+  const offsetNum = (pageNum - 1) * limitNum;
+  const limitInt = Number(limitNum);
+  const offsetInt = Number(offsetNum);
+  
+  // 使用字符串插值处理 LIMIT 和 OFFSET，避免参数类型问题（参考postService和articleService的实现）
+  query += ` LIMIT ${limitInt} OFFSET ${offsetInt}`;
   
   const [files] = await pool.execute(query, params);
   

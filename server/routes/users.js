@@ -3,7 +3,7 @@ import { body, validationResult } from 'express-validator';
 import { getUserByUsername, updateUserProfile, getUserStats } from '../services/userService.js';
 import { getUserFiles } from '../services/fileService.js';
 import { getMySQLPool } from '../config/database.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, optionalAuth } from '../middleware/auth.js';
 import { uploadSingle, uploadMultiple, processFileUpload, createUploadInstance } from '../utils/upload.js';
 
 const router = express.Router();
@@ -33,9 +33,9 @@ const uploadFields = () => {
 /**
  * @route   GET /api/users/:username
  * @desc    获取用户公开信息
- * @access  Public
+ * @access  Public (可选认证)
  */
-router.get('/:username', async (req, res) => {
+router.get('/:username', optionalAuth, async (req, res) => {
   try {
     const { username } = req.params;
 
@@ -47,13 +47,19 @@ router.get('/:username', async (req, res) => {
       });
     }
 
+    // 获取当前登录用户ID（如果有）
+    const currentUserId = req.user?.id || null;
+    
     // 获取用户统计信息
-    const stats = await getUserStats(user.id);
+    // 如果查看自己的档案，统计所有文件（包括非公开的）
+    // 否则只统计公开文件
+    const stats = await getUserStats(user.id, currentUserId);
 
     res.json({
       code: 0,
       data: {
         user: {
+          id: user.id, // 添加 id 字段，前端需要用它来过滤文件
           username: user.username,
           avatar: user.avatar,
           bio: user.bio,
@@ -521,7 +527,6 @@ router.get('/:username/files', async (req, res) => {
 });
 
 // 添加用户活动流API端点
-import { optionalAuth } from '../middleware/auth.js';
 
 /**
  * @route   GET /api/users/:username/activity
@@ -576,6 +581,7 @@ router.get('/:username/activity', optionalAuth, async (req, res) => {
          uf.original_name as originalName,
          uf.size,
          uf.mime_type as mimeType,
+         uf.file_url as fileUrl,
          uf.uploaded_at as uploadedAt,
          (SELECT COUNT(*) FROM file_likes fl WHERE fl.file_id = uf.id) as likeCount,
          (SELECT COUNT(*) FROM file_comments fc WHERE fc.file_id = uf.id) as commentCount,

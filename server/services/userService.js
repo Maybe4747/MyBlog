@@ -311,8 +311,10 @@ export const updateUserProfile = async (userId, profileData) => {
 
 /**
  * 获取用户统计信息
+ * @param {number} userId - 用户ID
+ * @param {number} [currentUserId] - 当前登录用户ID（可选，用于判断是否查看自己的档案）
  */
-export const getUserStats = async (userId) => {
+export const getUserStats = async (userId, currentUserId = null) => {
   const pool = getMySQLPool();
   
   // 获取关注者数量
@@ -321,11 +323,20 @@ export const getUserStats = async (userId) => {
     [userId]
   );
   
-  // 获取文件数量
-  const [filesCount] = await pool.execute(
-    'SELECT COUNT(*) as count FROM user_files WHERE user_id = ? AND visibility = \'public\'',
+  // 获取关注数量（当前用户关注了多少人）
+  const [following] = await pool.execute(
+    'SELECT COUNT(*) as count FROM follows WHERE follower_id = ?',
     [userId]
   );
+  
+  // 获取文件数量
+  // 如果查看自己的档案（currentUserId === userId），统计所有文件（包括非公开的）
+  // 否则只统计公开文件
+  let filesQuery = 'SELECT COUNT(*) as count FROM user_files WHERE user_id = ?';
+  if (currentUserId !== userId) {
+    filesQuery += ' AND visibility = \'public\'';
+  }
+  const [filesCount] = await pool.execute(filesQuery, [userId]);
   
   // 获取总浏览量（这里简化处理，实际上可能需要更复杂的逻辑）
   // 假设通过文件下载次数来近似浏览量
@@ -336,6 +347,7 @@ export const getUserStats = async (userId) => {
   
   return {
     followers: followers[0].count,
+    following: following[0].count,
     files: filesCount[0].count,
     views: views[0].total
   };

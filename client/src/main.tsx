@@ -12,6 +12,8 @@ import Profile from './pages/profile/index';
 import Upload from './pages/upload/index';
 import Search from './pages/search/index';
 import Notifications from './pages/notifications/index';
+import ArticleDetail from './pages/article/index';
+import FileDetail from './pages/file/index';
 
 const root = document.getElementById('root');
 if (root) {
@@ -67,6 +69,22 @@ if (root) {
                 element={
                   <ProtectedRoute>
                     <Notifications />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/articles/:articleId"
+                element={
+                  <ProtectedRoute>
+                    <ArticleDetail />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/files/:fileId"
+                element={
+                  <ProtectedRoute>
+                    <FileDetail />
                   </ProtectedRoute>
                 }
               />
