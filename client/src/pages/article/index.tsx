@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { getArticleById, toggleArticleLike, Article } from '../../api/articles';
 import Navbar from '../../components/Navbar';
+import { getDefaultAvatar } from '../../utils/commonUtils';
 import { HeartIcon, MessageCircleIcon, ShareIcon, CalendarIcon, UserIcon, ArrowLeftIcon } from 'lucide-react';
 
 const ArticleDetail = () => {
@@ -96,7 +97,15 @@ const ArticleDetail = () => {
       <div className="max-w-4xl mx-auto px-4 py-8">
         {/* 返回按钮 */}
         <button
-          onClick={() => navigate('/home')}
+          onClick={() => {
+            // 尝试使用浏览器后退，如果历史记录中有上一页
+            if (window.history.length > 1) {
+              navigate(-1);
+            } else {
+              // 如果没有历史记录，直接导航到首页
+              navigate('/home');
+            }
+          }}
           className="flex items-center text-gray-600 hover:text-gray-900 mb-6 transition-colors"
         >
           <ArrowLeftIcon className="w-5 h-5 mr-2" />
@@ -110,7 +119,7 @@ const ArticleDetail = () => {
             <div className="flex items-center mb-4">
               <img
                 className="h-16 w-16 rounded-full ring-2 ring-gray-200"
-                src={article.avatar || `https://ui-avatars.com/api/?name=${article.username}&background=random`}
+                src={article.avatar || getDefaultAvatar(article.username)}
                 alt={article.username}
               />
               <div className="ml-4">

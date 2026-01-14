@@ -121,7 +121,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     try {
       setError(null);
       setLoading(true);
-    const  {data,code,msg } = await registerApi(userData);
+      const { data, code, msg } = await registerApi(userData);
       if (code === 0) {
         const { token, refreshToken, user: newUser } = data;
 
@@ -149,8 +149,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setUser(safeUserData);
         return { success: true };
       } else {
-        setError(response.msg || '注册失败');
-        return { success: false, error: response.msg || '注册失败' };
+        setError(msg || '注册失败');
+        return { success: false, error: msg || '注册失败' };
       }
     } catch (err: any) {
       setError(err.message || '注册过程中出现错误');

@@ -93,7 +93,10 @@ export const getUserEducations = async (userId) => {
     `SELECT id, user_id, school, degree, major, start_date, end_date, description, created_at
      FROM user_education
      WHERE user_id = ?
-     ORDER BY start_date DESC`,
+     ORDER BY 
+       CASE WHEN end_date IS NULL THEN 0 ELSE 1 END ASC,
+       COALESCE(end_date, start_date) DESC,
+       start_date DESC`,
     [userId]
   );
 

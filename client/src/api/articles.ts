@@ -79,6 +79,47 @@ export const deleteArticle = async (articleId: number) => {
  * 点赞/取消点赞文章
  */
 export const toggleArticleLike = async (articleId: number) => {
-  return api.post<{ code: number; data: { liked: boolean } }>(`/articles/${articleId}/like`);
+  return api.post<{ code: number; data: { liked: boolean; likeCount: number } }>(`/articles/${articleId}/like`);
+};
+
+export interface Comment {
+  id: number;
+  article_id: number;
+  user_id: number;
+  content: string;
+  created_at: string;
+  updated_at: string;
+  username: string;
+  avatar: string | null;
+}
+
+export interface CommentsResponse {
+  comments: Comment[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+  };
+}
+
+/**
+ * 添加文章评论
+ */
+export const addArticleComment = async (articleId: number, content: string) => {
+  return api.post<{ code: number; data: { comment: Comment } }>(`/articles/${articleId}/comments`, { content });
+};
+
+/**
+ * 获取文章评论列表
+ */
+export const getArticleComments = async (articleId: number, params?: { page?: number; limit?: number }) => {
+  return api.get<{ code: number; data: CommentsResponse }>(`/articles/${articleId}/comments`, { params });
+};
+
+/**
+ * 删除文章评论
+ */
+export const deleteArticleComment = async (articleId: number, commentId: number) => {
+  return api.delete<{ code: number; data: null }>(`/articles/${articleId}/comments/${commentId}`);
 };
 

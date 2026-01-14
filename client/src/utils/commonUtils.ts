@@ -162,3 +162,65 @@ export const deepEqual = (a, b) => {
   
   return false;
 };
+
+/**
+ * 获取默认头像URL
+ * 根据用户名生成个性化的默认头像，如果用户名为空则返回通用默认头像
+ * @param {string} username - 用户名
+ * @param {string} fallback - 备用头像URL（可选）
+ * @returns {string} 头像URL
+ */
+export const getDefaultAvatar = (username?: string | null, fallback?: string): string => {
+  if (username && username.trim()) {
+    // 使用 ui-avatars.com 根据用户名生成个性化头像
+    // 使用用户名首字符作为头像，背景色随机
+    const name = username.trim();
+    return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random&color=fff&size=200&bold=true`;
+  }
+  
+  // 如果没有用户名，返回通用默认头像
+  return fallback || 'https://ui-avatars.com/api/?name=User&background=6366f1&color=fff&size=200&bold=true';
+};
+
+/**
+ * 格式化相对时间（如 "2小时前", "3天前"）
+ * @param {string | Date | null | undefined} dateString - 日期字符串或Date对象
+ * @returns {string} 相对时间字符串
+ */
+export const formatRelativeTime = (dateString?: string | Date | null): string => {
+  if (!dateString) return '刚刚';
+  
+  try {
+    const now = new Date();
+    const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
+    
+    // 检查日期是否有效
+    if (isNaN(date.getTime())) {
+      return '刚刚';
+    }
+    
+    const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+    
+    if (diffInSeconds < 60) {
+      return '刚刚';
+    } else if (diffInSeconds < 3600) {
+      const minutes = Math.floor(diffInSeconds / 60);
+      return `${minutes}分钟前`;
+    } else if (diffInSeconds < 86400) {
+      const hours = Math.floor(diffInSeconds / 3600);
+      return `${hours}小时前`;
+    } else if (diffInSeconds < 2592000) {
+      const days = Math.floor(diffInSeconds / 86400);
+      return `${days}天前`;
+    } else if (diffInSeconds < 31536000) {
+      const months = Math.floor(diffInSeconds / 2592000);
+      return `${months}个月前`;
+    } else {
+      const years = Math.floor(diffInSeconds / 31536000);
+      return `${years}年前`;
+    }
+  } catch (error) {
+    console.error('格式化时间失败:', error);
+    return '刚刚';
+  }
+};

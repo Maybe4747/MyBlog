@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { getFileById, updateFile, deleteFile, likeFile, unlikeFile } from '../../api/profiles';
 import Navbar from '../../components/Navbar';
+import { getDefaultAvatar } from '../../utils/commonUtils';
 import { 
   HeartIcon, 
   MessageCircleIcon, 
@@ -279,7 +280,15 @@ const FileDetail = () => {
           <div className="text-center">
             <p className="text-red-600 mb-4">{error || '文件不存在'}</p>
             <button
-              onClick={() => navigate('/home')}
+              onClick={() => {
+                // 尝试使用浏览器后退，如果历史记录中有上一页
+                if (window.history.length > 1) {
+                  navigate(-1);
+                } else {
+                  // 如果没有历史记录，直接导航到首页
+                  navigate('/home');
+                }
+              }}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
             >
               返回首页
@@ -299,7 +308,15 @@ const FileDetail = () => {
       <div className="max-w-4xl mx-auto px-4 py-8">
         {/* 返回按钮 */}
         <button
-          onClick={() => navigate('/home')}
+          onClick={() => {
+            // 尝试使用浏览器后退，如果历史记录中有上一页
+            if (window.history.length > 1) {
+              navigate(-1);
+            } else {
+              // 如果没有历史记录，直接导航到首页
+              navigate('/home');
+            }
+          }}
           className="flex items-center text-gray-600 hover:text-gray-900 mb-6 transition-colors"
         >
           <ArrowLeftIcon className="w-5 h-5 mr-2" />
@@ -314,7 +331,7 @@ const FileDetail = () => {
               <div className="flex items-center">
                 <img
                   className="h-16 w-16 rounded-full ring-2 ring-gray-200"
-                  src={file.avatar || `https://ui-avatars.com/api/?name=${file.owner_username}&background=random`}
+                  src={file.avatar || getDefaultAvatar(file.owner_username)}
                   alt={file.owner_username}
                 />
                 <div className="ml-4">

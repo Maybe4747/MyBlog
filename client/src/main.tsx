@@ -5,6 +5,7 @@ import './index.css';
 import { BrowserRouter, Route, Routes, Navigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import ErrorBoundary from './components/ErrorBoundary';
+import ScrollToTop from './components/ScrollToTop';
 import Home from './pages/home/index';
 import Login from './pages/login/index';
 import Register from './pages/register/index';
@@ -14,6 +15,7 @@ import Search from './pages/search/index';
 import Notifications from './pages/notifications/index';
 import ArticleDetail from './pages/article/index';
 import FileDetail from './pages/file/index';
+import PostDetail from './pages/post/index';
 
 const root = document.getElementById('root');
 if (root) {
@@ -22,6 +24,7 @@ if (root) {
       {/* <ErrorBoundary> */}
         <AuthProvider>
           <BrowserRouter>
+            <ScrollToTop />
             <Routes>
               {/* 首页 - Enter页面 */}
               <Route index element={<Navigate to="/enter" replace />} />
@@ -85,6 +88,14 @@ if (root) {
                 element={
                   <ProtectedRoute>
                     <FileDetail />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/posts/:postId"
+                element={
+                  <ProtectedRoute>
+                    <PostDetail />
                   </ProtectedRoute>
                 }
               />

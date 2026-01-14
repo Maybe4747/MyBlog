@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams } from 'react-router-dom';
-import { UserIcon, BriefcaseIcon, MapPinIcon, LinkIcon, CalendarIcon, HeartIcon, MessageCircleIcon, MoreHorizontalIcon, FileIcon, DownloadIcon, UsersIcon, UserCheckIcon, MessageSquareIcon, FileTextIcon, ImageIcon, GraduationCapIcon, PlusIcon, Edit3Icon, Trash2Icon, CameraIcon, Building2Icon } from 'lucide-react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { UserIcon, BriefcaseIcon, MapPinIcon, LinkIcon, CalendarIcon, HeartIcon, MessageCircleIcon, MoreHorizontalIcon, FileIcon, DownloadIcon, UsersIcon, UserCheckIcon, MessageSquareIcon, FileTextIcon, ImageIcon, GraduationCapIcon, PlusIcon, Edit3Icon, Trash2Icon, CameraIcon, Building2Icon, XIcon, ShareIcon } from 'lucide-react';
 import { getUserProfile, getUserActivity, getPublicFiles } from '../../api/users';
 import { updateProfile } from '../../api/profiles';
 import api from '../../api/client';
 import { followUser, unfollowUser, getFollowers, getFollowing } from '../../api/social';
-import { addMessage, getUserMessages, likeMessage, unlikeMessage } from '../../api/messages';
+import { addMessage, getUserMessages, likeMessage, unlikeMessage, deleteMessage } from '../../api/messages';
+import { getPosts, togglePostLike, addPostComment, getPostComments, deletePostComment, Comment as PostComment } from '../../api/posts';
+import { getArticles, toggleArticleLike, addArticleComment, getArticleComments, deleteArticleComment } from '../../api/articles';
+import { likeFile, unlikeFile, commentOnFile, getFileComments, deleteFileComment } from '../../api/profiles';
 import { useAuth } from '../../contexts/AuthContext';
+import { getDefaultAvatar } from '../../utils/commonUtils';
 import { 
   getUserExperiences,
   addUserExperience,
@@ -17,6 +21,8 @@ import {
   updateUserEducation,
   deleteUserEducation
 } from '../../api/experiences';
+import PostCard, { PostCardPost } from '../../components/PostCard';
+import PostFeed from '../../components/PostFeed';
 
 // 日期格式化辅助函数
 const formatDate = (dateString: string | null | undefined): string => {
@@ -285,22 +291,30 @@ interface ProfileParams {
 
 const Profile = () => {
   const { username } = useParams<ProfileParams>();
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, updateUser } = useAuth();
   const [profileData, setProfileData] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [isFollowing, setIsFollowing] = useState<boolean>(false);
 
-  // 文件列表相关状态
+  // 内容列表相关状态
   const [userActivity, setUserActivity] = useState<any[]>([]);
-  const [filesLoading, setFilesLoading] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<string>('files');
+  const [userPosts, setUserPosts] = useState<any[]>([]);
+  const [userArticles, setUserArticles] = useState<any[]>([]);
+  const [userFiles, setUserFiles] = useState<any[]>([]);
+  const [contentLoading, setContentLoading] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<string>('all');
+  const hasFetchedContent = useRef(false);
   const hasFetchedFiles = useRef(false);
 
   // 社交相关状态
   const [followers, setFollowers] = useState<any[]>([]);
   const [following, setFollowing] = useState<any[]>([]);
   const [socialLoading, setSocialLoading] = useState<boolean>(false);
+  const [followingUsers, setFollowingUsers] = useState<Set<number>>(new Set());
+  const [followingLoading, setFollowingLoading] = useState<Record<number, boolean>>({});
+  
+  const navigate = useNavigate();
 
   // 留言相关状态
   const [messages, setMessages] = useState<any[]>([]);
@@ -322,13 +336,17 @@ const Profile = () => {
   const [editData, setEditData] = useState<{
     bio: string;
     location: string;
-    website: string;
+    position: string;
+    company: string;
     skills: string;
+    socialLinks: Array<{ platform: string; url: string }>;
   }>({
     bio: '',
     location: '',
-    website: '',
-    skills: ''
+    position: '',
+    company: '',
+    skills: '',
+    socialLinks: []
   });
   const [currentSkills, setCurrentSkills] = useState<string[]>([]);
   const [newSkillInput, setNewSkillInput] = useState<string>('');
@@ -340,7 +358,34 @@ const Profile = () => {
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState<boolean>(false);
 
-  // 获取用户活动流（包括文件）
+  // 预览模态框相关状态
+  const [previewModalOpen, setPreviewModalOpen] = useState<boolean>(false);
+  const [previewMediaUrl, setPreviewMediaUrl] = useState<string>('');
+  const [previewMediaType, setPreviewMediaType] = useState<'image' | 'video'>('image');
+  const [previewTitle, setPreviewTitle] = useState<string>('');
+
+  // 打开预览模态框
+  const openPreviewModal = useCallback((mediaUrl: string, mediaType: 'image' | 'video', title: string = '') => {
+    setPreviewMediaUrl(mediaUrl);
+    setPreviewMediaType(mediaType);
+    setPreviewTitle(title);
+    setPreviewModalOpen(true);
+  }, []);
+
+  // 关闭预览模态框
+  const closePreviewModal = useCallback(() => {
+    setPreviewModalOpen(false);
+    setPreviewMediaUrl('');
+    setPreviewTitle('');
+  }, []);
+
+  // 评论相关状态
+  const [expandedComments, setExpandedComments] = useState<Set<string | number>>(new Set());
+  const [postComments, setPostComments] = useState<Record<string | number, PostComment[]>>({});
+  const [loadingComments, setLoadingComments] = useState<Record<string | number, boolean>>({});
+
+
+  // 获取用户活动流（包括文件、帖子、文章）
   const fetchUserActivity = useCallback(async (): Promise<void> => {
     console.log('fetchUserActivity: 函数被调用', { username, hasProfileData: !!profileData });
     
@@ -351,15 +396,16 @@ const Profile = () => {
 
     try {
       console.log('fetchUserActivity: 设置 loading 状态');
-      setFilesLoading(true);
+      setContentLoading(true);
       
       // 判断是否是自己的档案
       const isOwn = currentUser && currentUser.username === username;
       
       // 尝试多种方式获取 userId
-      // 注意：getUserByUsername 返回的 user 对象可能没有 id 字段，需要从后端获取
-      // 如果 profileData 没有 id，我们需要通过 username 来查询文件
       let userId = profileData.id || profileData.userId || profileData.user_id;
+      
+      // 获取关注状态（用于判断是否显示关注者可见的内容）
+      const currentIsFollowing = isFollowing;
       
       console.log('fetchUserActivity: 检查 userId', { 
         profileData,
@@ -377,59 +423,111 @@ const Profile = () => {
         console.log('fetchUserActivity: 使用 currentUser.id', { userId });
       }
       
-      // 如果还是没有 userId，我们需要从后端获取用户ID
-      // 但为了简化，我们先尝试使用 username 来过滤
       if (!userId) {
-        console.warn('fetchUserActivity: 缺少 userId，但继续尝试通过 username 过滤', { 
+        console.warn('fetchUserActivity: 缺少 userId，无法获取内容', { 
           profileData,
           username 
         });
-        // 不返回，继续执行，通过 username 来过滤
+        setUserActivity([]);
+        setUserPosts([]);
+        setUserArticles([]);
+        setUserFiles([]);
+        return;
       }
       
-      console.log('fetchUserActivity: 开始获取文件', { username, userId, isOwn });
-      console.log('fetchUserActivity: 调用 getPublicFiles API', { limit: 50 });
+      console.log('fetchUserActivity: 开始获取内容', { username, userId, isOwn });
       
-      // 后端会自动从认证 token 获取 currentUserId，所以不需要传递
-      // 如果查看自己的档案，后端会返回所有自己的文件（包括非公开的）
-      // 如果查看别人的档案，后端只返回公开文件
-      const response: any = await getPublicFiles({ 
-        limit: 50
-      });
+      // 并行获取文件、帖子和文章
+      // 传 visibility: 'followers'，后端会返回公开的 + 关注者可见的（如果已关注）+ 自己的
+      const [filesResponse, postsResponse, articlesResponse] = await Promise.allSettled([
+        getPublicFiles({ limit: 50 }),
+        getPosts({ userId, limit: 50, visibility: 'followers' }),
+        getArticles({ userId, limit: 50, visibility: 'followers' })
+      ]);
       
-      console.log('fetchUserActivity: getPublicFiles API 调用完成', { 
-        hasResponse: !!response,
-        response 
-      });
+      // 处理文件数据
+      let files: any[] = [];
+      if (filesResponse.status === 'fulfilled') {
+        const response = filesResponse.value as any;
+        if (response?.code === 0 && response?.data?.files) {
+          const allFiles = response.data.files;
+          files = allFiles.filter((file: any) => {
+            if (isOwn) {
+              return file.user_id === userId;
+            } else {
+              // 显示公开的，或者如果当前用户已关注该作者，也显示关注者可见的
+              return file.user_id === userId && (
+                file.visibility === 'public' || 
+                (file.visibility === 'followers' && currentIsFollowing)
+              );
+            }
+          });
+          setUserFiles(files);
+        } else {
+          setUserFiles([]);
+        }
+      } else {
+        setUserFiles([]);
+      }
       
-      console.log('fetchUserActivity: API 响应', { 
-        code: response?.code, 
-        filesCount: response?.data?.files?.length,
-        files: response?.data?.files 
-      });
+      // 处理帖子数据
+      let posts: any[] = [];
+      if (postsResponse.status === 'fulfilled') {
+        const response = postsResponse.value as any;
+        if (response?.code === 0 && response?.data?.posts) {
+          const allPosts = response.data.posts;
+          posts = allPosts.filter((post: any) => {
+            if (isOwn) {
+              return post.user_id === userId;
+            } else {
+              // 显示公开的，或者如果当前用户已关注该作者，也显示关注者可见的
+              return post.user_id === userId && (
+                post.visibility === 'public' || 
+                (post.visibility === 'followers' && currentIsFollowing)
+              );
+            }
+          });
+          setUserPosts(posts);
+        } else {
+          setUserPosts([]);
+        }
+      } else {
+        setUserPosts([]);
+      }
       
-      if (response?.code === 0 && response?.data?.files) {
-        // 如果是查看自己的档案，显示所有文件（包括非公开的）
-        // 如果是查看别人的档案，只显示该用户的公开文件
-        const files = response.data.files.filter((file: any) => {
-          if (isOwn) {
-            // 自己的档案：显示所有自己的文件（包括 public、followers、private）
-            return file.user_id === userId;
-          } else {
-            // 别人的档案：只显示该用户的公开文件
-            return file.user_id === userId && file.visibility === 'public';
-          }
-        });
-        
-        console.log('fetchUserActivity: 过滤后的文件', { 
-          totalFiles: response.data.files.length,
-          filteredFiles: files.length,
-          files 
-        });
-        
-        // 转换为活动格式
-        const activities = files.map((file: any) => ({
-          id: file.id,
+      // 处理文章数据
+      let articles: any[] = [];
+      if (articlesResponse.status === 'fulfilled') {
+        const response = articlesResponse.value as any;
+        if (response?.code === 0 && response?.data?.articles) {
+          const allArticles = response.data.articles;
+          articles = allArticles.filter((article: any) => {
+            if (isOwn) {
+              return article.user_id === userId;
+            } else {
+              // 显示公开的，或者如果当前用户已关注该作者，也显示关注者可见的
+              return article.user_id === userId && (
+                article.visibility === 'public' || 
+                (article.visibility === 'followers' && currentIsFollowing)
+              );
+            }
+          });
+          setUserArticles(articles);
+        } else {
+          setUserArticles([]);
+        }
+      } else {
+        setUserArticles([]);
+      }
+      
+      // 合并所有活动到 userActivity（用于"我的动态"标签页）
+      const activities: any[] = [];
+      
+      // 添加文件活动
+      files.forEach((file: any) => {
+        activities.push({
+          id: `file_${file.id}`,
+          originalId: file.id,
           type: 'file_upload',
           title: file.title,
           description: file.description,
@@ -438,25 +536,87 @@ const Profile = () => {
           mimeType: file.mime_type,
           fileUrl: file.file_url,
           uploadedAt: file.uploaded_at,
+          createdAt: file.uploaded_at,
           visibility: file.visibility,
           likeCount: file.likeCount || 0,
           commentCount: file.commentCount || 0,
           downloadCount: file.download_count || 0
-        }));
+        });
+      });
+      
+      // 添加帖子活动
+      posts.forEach((post: any) => {
+        const isVideo = post.image_url && (
+          post.image_url.toLowerCase().endsWith('.mp4') ||
+          post.image_url.toLowerCase().endsWith('.webm') ||
+          post.image_url.toLowerCase().endsWith('.ogg') ||
+          post.image_url.toLowerCase().endsWith('.mov')
+        );
         
-        console.log('fetchUserActivity: 设置活动列表', { activitiesCount: activities.length });
-        setUserActivity(activities);
-      } else {
-        console.log('fetchUserActivity: API 返回错误或空数据', response);
-        setUserActivity([]);
-      }
+        activities.push({
+          id: `post_${post.id}`,
+          originalId: post.id,
+          type: isVideo ? 'video_post' : (post.image_url ? 'image_post' : 'post'),
+          title: post.content || '帖子',
+          content: post.content,
+          caption: post.content,
+          description: post.content,
+          mediaUrl: post.image_url,
+          mediaType: isVideo ? 'video' : 'image',
+          createdAt: post.created_at,
+          uploadedAt: post.created_at,
+          visibility: post.visibility,
+          likeCount: post.like_count || 0,
+          commentCount: post.comment_count || 0
+        });
+      });
+      
+      // 添加文章活动
+      articles.forEach((article: any) => {
+        activities.push({
+          id: `article_${article.id}`,
+          originalId: article.id,
+          type: 'article',
+          title: article.title,
+          description: article.summary || article.content?.substring(0, 200),
+          summary: article.summary,
+          content: article.content,
+          articleUrl: `/articles/${article.id}`,
+          createdAt: article.created_at,
+          publishedAt: article.created_at,
+          visibility: article.visibility,
+          likeCount: article.like_count || 0,
+          commentCount: article.comment_count || 0,
+          claps: article.like_count || 0,
+          readTime: '3分钟'
+        });
+      });
+      
+      // 按时间排序（最新的在前）
+      activities.sort((a, b) => {
+        const timeA = new Date(a.createdAt || a.uploadedAt || 0).getTime();
+        const timeB = new Date(b.createdAt || b.uploadedAt || 0).getTime();
+        return timeB - timeA;
+      });
+      
+      console.log('fetchUserActivity: 设置活动列表', { 
+        activitiesCount: activities.length,
+        filesCount: files.length,
+        postsCount: posts.length,
+        articlesCount: articles.length
+      });
+      
+      setUserActivity(activities);
     } catch (err: any) {
       console.error('获取用户活动流失败:', err);
       setUserActivity([]);
+      setUserPosts([]);
+      setUserArticles([]);
+      setUserFiles([]);
     } finally {
-      setFilesLoading(false);
+      setContentLoading(false);
     }
-  }, [username, profileData, currentUser]);
+  }, [username, profileData, currentUser, isFollowing]);
 
   // 获取工作经历和教育经历
   const fetchExperiencesAndEducations = useCallback(async () => {
@@ -468,8 +628,48 @@ const Profile = () => {
       ]);
       
       // 直接使用数据库返回的字段名（start_date, end_date）
-      const experiencesData = expResponse.data?.data?.experiences || expResponse.data?.experiences || [];
-      const educationsData = eduResponse.data?.data?.educations || eduResponse.data?.educations || [];
+      let experiencesData = expResponse.data?.data?.experiences || expResponse.data?.experiences || [];
+      let educationsData = eduResponse.data?.data?.educations || eduResponse.data?.educations || [];
+      
+      // 前端排序（作为备用，确保排序正确）
+      // 排序规则：仍在职/在读的优先，然后按结束时间（如果有）或开始时间降序
+      experiencesData = experiencesData.sort((a: any, b: any) => {
+        // 仍在职的（end_date 为 null）优先显示
+        if (!a.end_date && b.end_date) return -1;
+        if (a.end_date && !b.end_date) return 1;
+        
+        // 比较结束时间（如果有）或开始时间
+        const aDate = a.end_date || a.start_date;
+        const bDate = b.end_date || b.start_date;
+        
+        if (!aDate && !bDate) return 0;
+        if (!aDate) return 1;
+        if (!bDate) return -1;
+        
+        const dateA = new Date(aDate).getTime();
+        const dateB = new Date(bDate).getTime();
+        
+        return dateB - dateA; // 降序，最新的在前
+      });
+      
+      educationsData = educationsData.sort((a: any, b: any) => {
+        // 仍在读的（end_date 为 null）优先显示
+        if (!a.end_date && b.end_date) return -1;
+        if (a.end_date && !b.end_date) return 1;
+        
+        // 比较结束时间（如果有）或开始时间
+        const aDate = a.end_date || a.start_date;
+        const bDate = b.end_date || b.start_date;
+        
+        if (!aDate && !bDate) return 0;
+        if (!aDate) return 1;
+        if (!bDate) return -1;
+        
+        const dateA = new Date(aDate).getTime();
+        const dateB = new Date(bDate).getTime();
+        
+        return dateB - dateA; // 降序，最新的在前
+      });
       
       setExperiences(experiencesData);
       setEducations(educationsData);
@@ -547,11 +747,21 @@ const Profile = () => {
   // 初始化编辑数据
   useEffect(() => {
     if (profileData) {
+      // 将 socialLinks 对象转换为数组格式
+      const socialLinksArray = profileData.socialLinks 
+        ? Object.entries(profileData.socialLinks).map(([platform, url]) => ({
+            platform: platform,
+            url: url as string
+          }))
+        : [];
+      
       setEditData({
         bio: profileData.bio || '',
         location: profileData.location || '',
-        website: profileData.website || '',
-        skills: profileData.skills ? profileData.skills.join(', ') : ''
+        position: profileData.position || '',
+        company: profileData.company || '',
+        skills: profileData.skills ? profileData.skills.join(', ') : '',
+        socialLinks: socialLinksArray
       });
       // 初始化技能数组
       setCurrentSkills(profileData.skills ? [...profileData.skills] : []);
@@ -575,24 +785,24 @@ const Profile = () => {
   const handleAddExperience = useCallback(async (experienceData) => {
     try {
       const response = await addUserExperience(experienceData);
-      const newExperience = response.data?.data?.experience || response.data?.experience;
-      setExperiences(prev => [newExperience, ...prev]);
       setShowAddExperience(false);
+      // 重新获取数据，确保排序正确
+      await fetchExperiencesAndEducations();
     } catch (err) {
       setError(err.message || '添加工作经历失败');
     }
-  }, []);
+  }, [fetchExperiencesAndEducations]);
 
   const handleUpdateExperience = useCallback(async (id, experienceData) => {
     try {
       const response = await updateUserExperience(id, experienceData);
-      const updatedExperience = response.data?.data?.experience || response.data?.experience;
-      setExperiences(prev => prev.map(exp => exp.id === id ? updatedExperience : exp));
       setEditingExperience(null);
+      // 重新获取数据，确保排序正确
+      await fetchExperiencesAndEducations();
     } catch (err) {
       setError(err.message || '更新工作经历失败');
     }
-  }, []);
+  }, [fetchExperiencesAndEducations]);
 
   const handleDeleteExperience = useCallback(async (id) => {
     if (window.confirm('确定要删除这条工作经历吗？')) {
@@ -609,24 +819,24 @@ const Profile = () => {
   const handleAddEducation = useCallback(async (educationData) => {
     try {
       const response = await addUserEducation(educationData);
-      const newEducation = response.data?.data?.education || response.data?.education;
-      setEducations(prev => [newEducation, ...prev]);
       setShowAddEducation(false);
+      // 重新获取数据，确保排序正确
+      await fetchExperiencesAndEducations();
     } catch (err) {
       setError(err.message || '添加教育经历失败');
     }
-  }, []);
+  }, [fetchExperiencesAndEducations]);
 
   const handleUpdateEducation = useCallback(async (id, educationData) => {
     try {
       const response = await updateUserEducation(id, educationData);
-      const updatedEducation = response.data?.data?.education || response.data?.education;
-      setEducations(prev => prev.map(edu => edu.id === id ? updatedEducation : edu));
       setEditingEducation(null);
+      // 重新获取数据，确保排序正确
+      await fetchExperiencesAndEducations();
     } catch (err) {
       setError(err.message || '更新教育经历失败');
     }
-  }, []);
+  }, [fetchExperiencesAndEducations]);
 
   const handleDeleteEducation = useCallback(async (id) => {
     if (window.confirm('确定要删除这条教育经历吗？')) {
@@ -662,8 +872,10 @@ const Profile = () => {
   const fetchMessages = useCallback(async () => {
     try {
       setMessagesLoading(true);
-      const response = await getUserMessages(profileData.id, { page: 1, limit: 10 });
-      setMessages(response.data.messages || []);
+      const response: any = await getUserMessages(profileData.id, { page: 1, limit: 10 });
+      // 处理API响应格式
+      const messagesData = response.data?.messages || response.data?.data?.messages || response.messages || [];
+      setMessages(messagesData);
     } catch (err) {
       console.error('获取留言失败:', err);
     } finally {
@@ -684,16 +896,28 @@ const Profile = () => {
     }
   }, [profileData?.id, messageContent, fetchMessages]);
 
-  const handleLikeMessage = useCallback(async (messageId, isLiked) => {
+  const handleLikeMessage = useCallback(async (messageId: number, isLiked: boolean) => {
     try {
+      let result: any;
       if (isLiked) {
-        await unlikeMessage(messageId);
+        result = await unlikeMessage(messageId);
       } else {
-        await likeMessage(messageId);
+        result = await likeMessage(messageId);
       }
-      // 重新获取留言列表
-      fetchMessages();
-    } catch (err) {
+      
+      // 如果API返回了更新后的数据，直接更新状态，否则重新获取列表
+      if (result?.data?.likeCount !== undefined) {
+        setMessages(prevMessages => prevMessages.map(msg => 
+          msg.id === messageId 
+            ? { ...msg, isLiked: result.data.liked, likeCount: result.data.likeCount }
+            : msg
+        ));
+      } else {
+        // 重新获取留言列表
+        fetchMessages();
+      }
+    } catch (err: any) {
+      console.error('点赞留言失败:', err);
       setError(err.message || '操作失败');
     }
   }, [fetchMessages]);
@@ -713,6 +937,217 @@ const Profile = () => {
       setError(err.message || '操作失败');
     }
   }, [profileData, isFollowing]);
+
+  // 处理点赞
+  const handleLike = useCallback(async (postId: string | number) => {
+    if (!currentUser) {
+      navigate('/login');
+      return;
+    }
+
+    try {
+      // 在所有内容中查找（posts、articles、files）
+      const allContent = [
+        ...userPosts.map(p => ({ ...p, contentType: 'image' as const })),
+        ...userArticles.map(a => ({ ...a, contentType: 'article' as const })),
+        ...userFiles.map(f => ({ ...f, contentType: 'file' as const }))
+      ];
+      
+      const item = allContent.find(p => p.id === postId);
+      if (!item || !item.id) return;
+
+      let result: any;
+      
+      if (item.contentType === 'article') {
+        result = await toggleArticleLike(item.id);
+        if (result && result.code === 0 && result.data) {
+          const newLiked = result.data.liked;
+          const newLikeCount = result.data.likeCount ?? (item.likeCount || item.like_count || 0);
+          setUserArticles(prev => prev.map(a => 
+            a.id === postId ? { ...a, liked: newLiked, likeCount: newLikeCount, like_count: newLikeCount } : a
+          ));
+        }
+      } else if (item.contentType === 'file') {
+        const isCurrentlyLiked = item.liked;
+        if (isCurrentlyLiked) {
+          result = await unlikeFile(item.id);
+        } else {
+          result = await likeFile(item.id);
+        }
+        if (result && result.code === 0 && result.data) {
+          const newLiked = result.data.liked;
+          const newLikeCount = result.data.likeCount ?? (item.likeCount || item.like_count || 0);
+          setUserFiles(prev => prev.map(f => 
+            f.id === postId ? { ...f, liked: newLiked, likeCount: newLikeCount, like_count: newLikeCount } : f
+          ));
+        }
+      } else {
+        // 帖子
+        result = await togglePostLike(item.id);
+        if (result && result.code === 0 && result.data) {
+          const newLiked = result.data.liked;
+          const newLikeCount = result.data.likeCount ?? (item.likeCount || item.like_count || 0);
+          setUserPosts(prev => prev.map(p => 
+            p.id === postId ? { ...p, liked: newLiked, likeCount: newLikeCount, like_count: newLikeCount } : p
+          ));
+        }
+      }
+    } catch (err: any) {
+      console.error('点赞操作失败:', err);
+      setError(err.message || '操作失败');
+    }
+  }, [currentUser, userPosts, userArticles, userFiles, navigate]);
+
+  // 处理展开/收起评论
+  const handleToggleComments = useCallback(async (postId: string | number) => {
+    if (!currentUser) {
+      navigate('/login');
+      return;
+    }
+
+    // 在所有内容中查找
+    const allContent = [
+      ...userPosts.map(p => ({ ...p, contentType: 'image' as const })),
+      ...userArticles.map(a => ({ ...a, contentType: 'article' as const })),
+      ...userFiles.map(f => ({ ...f, contentType: 'file' as const }))
+    ];
+    
+    const item = allContent.find(p => p.id === postId);
+    if (!item || !item.id) return;
+
+    const isExpanded = expandedComments.has(postId);
+    
+    if (isExpanded) {
+      // 收起评论
+      setExpandedComments(prev => {
+        const next = new Set(prev);
+        next.delete(postId);
+        return next;
+      });
+    } else {
+      // 展开评论
+      setExpandedComments(prev => new Set(prev).add(postId));
+      
+      // 如果还没有加载过评论，则加载
+      if (!postComments[postId]) {
+        setLoadingComments(prev => ({ ...prev, [postId]: true }));
+        try {
+          let result: any;
+          if (item.contentType === 'article') {
+            result = await getArticleComments(item.id);
+          } else if (item.contentType === 'file') {
+            result = await getFileComments(item.id);
+          } else {
+            result = await getPostComments(item.id);
+          }
+          
+          if (result && result.code === 0 && result.data) {
+            setPostComments(prev => ({ ...prev, [postId]: result.data.comments || [] }));
+          }
+        } catch (err) {
+          console.error('加载评论失败:', err);
+        } finally {
+          setLoadingComments(prev => ({ ...prev, [postId]: false }));
+        }
+      }
+    }
+  }, [currentUser, userPosts, userArticles, userFiles, expandedComments, postComments, navigate]);
+
+  // 处理添加评论
+  const handleAddComment = useCallback(async (postId: string | number, content: string) => {
+    // 在所有内容中查找
+    const allContent = [
+      ...userPosts.map(p => ({ ...p, contentType: 'image' as const })),
+      ...userArticles.map(a => ({ ...a, contentType: 'article' as const })),
+      ...userFiles.map(f => ({ ...f, contentType: 'file' as const }))
+    ];
+    
+    const item = allContent.find(p => p.id === postId);
+    if (!item || !item.id) return;
+
+    try {
+      let result: any;
+      if (item.contentType === 'article') {
+        result = await addArticleComment(item.id, content);
+      } else if (item.contentType === 'file') {
+        result = await commentOnFile(item.id, content);
+      } else {
+        result = await addPostComment(item.id, content);
+      }
+      
+      if (result && result.code === 0 && result.data && result.data.comment) {
+        setPostComments(prev => ({
+          ...prev,
+          [postId]: [...(prev[postId] || []), result.data.comment]
+        }));
+        // 更新评论数
+        if (item.contentType === 'article') {
+          setUserArticles(prev => prev.map(a => 
+            a.id === postId ? { ...a, commentCount: (a.commentCount || a.comment_count || 0) + 1, comment_count: (a.commentCount || a.comment_count || 0) + 1 } : a
+          ));
+        } else if (item.contentType === 'file') {
+          setUserFiles(prev => prev.map(f => 
+            f.id === postId ? { ...f, commentCount: (f.commentCount || f.comment_count || 0) + 1, comment_count: (f.commentCount || f.comment_count || 0) + 1 } : f
+          ));
+        } else {
+          setUserPosts(prev => prev.map(p => 
+            p.id === postId ? { ...p, commentCount: (p.commentCount || p.comment_count || 0) + 1, comment_count: (p.commentCount || p.comment_count || 0) + 1 } : p
+          ));
+        }
+      }
+    } catch (err: any) {
+      console.error('添加评论失败:', err);
+      setError(err.message || '添加评论失败');
+    }
+  }, [userPosts, userArticles, userFiles]);
+
+  // 处理删除评论
+  const handleDeleteComment = useCallback(async (postId: string | number, commentId: number) => {
+    // 在所有内容中查找
+    const allContent = [
+      ...userPosts.map(p => ({ ...p, contentType: 'image' as const })),
+      ...userArticles.map(a => ({ ...a, contentType: 'article' as const })),
+      ...userFiles.map(f => ({ ...f, contentType: 'file' as const }))
+    ];
+    
+    const item = allContent.find(p => p.id === postId);
+    if (!item || !item.id) return;
+
+    try {
+      let result: any;
+      if (item.contentType === 'article') {
+        result = await deleteArticleComment(item.id, commentId);
+      } else if (item.contentType === 'file') {
+        result = await deleteFileComment(item.id, commentId);
+      } else {
+        result = await deletePostComment(item.id, commentId);
+      }
+      
+      if (result && result.code === 0) {
+        setPostComments(prev => ({
+          ...prev,
+          [postId]: (prev[postId] || []).filter(c => c.id !== commentId)
+        }));
+        // 更新评论数
+        if (item.contentType === 'article') {
+          setUserArticles(prev => prev.map(a => 
+            a.id === postId ? { ...a, commentCount: Math.max(0, (a.commentCount || a.comment_count || 0) - 1), comment_count: Math.max(0, (a.commentCount || a.comment_count || 0) - 1) } : a
+          ));
+        } else if (item.contentType === 'file') {
+          setUserFiles(prev => prev.map(f => 
+            f.id === postId ? { ...f, commentCount: Math.max(0, (f.commentCount || f.comment_count || 0) - 1), comment_count: Math.max(0, (f.commentCount || f.comment_count || 0) - 1) } : f
+          ));
+        } else {
+          setUserPosts(prev => prev.map(p => 
+            p.id === postId ? { ...p, commentCount: Math.max(0, (p.commentCount || p.comment_count || 0) - 1), comment_count: Math.max(0, (p.commentCount || p.comment_count || 0) - 1) } : p
+          ));
+        }
+      }
+    } catch (err: any) {
+      console.error('删除评论失败:', err);
+      setError(err.message || '删除评论失败');
+    }
+  }, [userPosts, userArticles, userFiles]);
 
   const handleEditChange = useCallback((e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -763,6 +1198,8 @@ const Profile = () => {
             ...prev,
             avatar: avatarUrl
           }));
+          // 同步更新 AuthContext 中的用户信息，使首页头像也能更新
+          updateUser({ avatar: avatarUrl });
           setAvatarPreview(null); // 清除预览，使用服务器返回的URL
         }
       } catch (err: any) {
@@ -848,8 +1285,17 @@ const Profile = () => {
         const formData = new FormData();
         formData.append('bio', editData.bio);
         formData.append('location', editData.location);
-        formData.append('website', editData.website);
+        formData.append('position', editData.position);
+        formData.append('company', editData.company);
         formData.append('skills', JSON.stringify(skillsArray));
+        formData.append('socialLinks', JSON.stringify(
+          editData.socialLinks
+            .filter(link => link.platform.trim() && link.url.trim())
+            .reduce((acc, link) => {
+              acc[link.platform] = link.url;
+              return acc;
+            }, {} as Record<string, string>)
+        ));
         
         if (avatarFile) {
           formData.append('avatar', avatarFile);
@@ -867,22 +1313,44 @@ const Profile = () => {
         const updatedData = response.data?.data || response.data;
         
         // 更新本地状态
+        const newAvatar = updatedData?.avatar || updatedData?.user?.avatar;
+        const newCoverImage = updatedData?.coverImage || updatedData?.user?.coverImage;
+        
         setProfileData(prev => ({
           ...prev,
           bio: editData.bio,
           location: editData.location,
-          website: editData.website,
+          position: editData.position,
+          company: editData.company,
           skills: skillsArray,
-          avatar: updatedData?.avatar || prev.avatar,
-          coverImage: updatedData?.coverImage || prev.coverImage
+          socialLinks: editData.socialLinks
+            .filter(link => link.platform.trim() && link.url.trim())
+            .reduce((acc, link) => {
+              acc[link.platform] = link.url;
+              return acc;
+            }, {} as Record<string, string>),
+          avatar: newAvatar || prev.avatar,
+          coverImage: newCoverImage || prev.coverImage
         }));
+        
+        // 同步更新 AuthContext 中的用户信息，使首页头像也能更新
+        if (newAvatar) {
+          updateUser({ avatar: newAvatar });
+        }
       } else {
         // 没有图片上传，使用普通JSON请求
         await updateProfile({
           bio: editData.bio,
           location: editData.location,
-          website: editData.website,
-          skills: skillsArray
+          position: editData.position,
+          company: editData.company,
+          skills: skillsArray,
+          socialLinks: editData.socialLinks
+            .filter(link => link.platform.trim() && link.url.trim())
+            .reduce((acc, link) => {
+              acc[link.platform] = link.url;
+              return acc;
+            }, {} as Record<string, string>)
         });
 
         // 更新本地状态
@@ -890,8 +1358,15 @@ const Profile = () => {
           ...prev,
           bio: editData.bio,
           location: editData.location,
-          website: editData.website,
-          skills: skillsArray
+          position: editData.position,
+          company: editData.company,
+          skills: skillsArray,
+          socialLinks: editData.socialLinks
+            .filter(link => link.platform.trim() && link.url.trim())
+            .reduce((acc, link) => {
+              acc[link.platform] = link.url;
+              return acc;
+            }, {} as Record<string, string>)
         }));
       }
 
@@ -944,8 +1419,15 @@ const Profile = () => {
     setEditData({
       bio: profileData?.bio || '',
       location: profileData?.location || '',
-      website: profileData?.website || '',
-      skills: profileData?.skills ? profileData.skills.join(', ') : ''
+      position: profileData?.position || '',
+      company: profileData?.company || '',
+      skills: profileData?.skills ? profileData.skills.join(', ') : '',
+      socialLinks: profileData?.socialLinks 
+        ? Object.entries(profileData.socialLinks).map(([platform, url]) => ({
+            platform: platform,
+            url: url as string
+          }))
+        : []
     });
     setIsEditing(false);
   }, [profileData]);
@@ -1031,6 +1513,45 @@ const Profile = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* 预览模态框 */}
+      {previewModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          onClick={closePreviewModal}
+        >
+          <div className="relative max-w-5xl max-h-[90vh] p-4" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={closePreviewModal}
+              className="absolute top-4 right-4 bg-black/50 text-white rounded-full p-2 hover:bg-black/70 transition-colors z-10"
+            >
+              <XIcon className="w-6 h-6" />
+            </button>
+            {previewMediaType === 'video' ? (
+              <video
+                src={previewMediaUrl}
+                controls
+                autoPlay
+                className="max-w-full max-h-[80vh] object-contain rounded-lg"
+              >
+                您的浏览器不支持视频播放
+              </video>
+            ) : (
+              <img
+                src={previewMediaUrl}
+                alt={previewTitle}
+                className="max-w-full max-h-[80vh] object-contain rounded-lg"
+              />
+            )}
+            {previewTitle && (
+              <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 text-white text-center bg-black/50 px-4 py-2 rounded-lg">
+                <p className="font-medium">{previewTitle}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+
       {/* Cover image */}
       <div className="h-56 bg-gradient-to-br from-blue-100 via-purple-50 to-pink-50 relative overflow-hidden group">
         {coverPreview ? (
@@ -1083,7 +1604,7 @@ const Profile = () => {
                 <div className="relative">
                   <img
                     className="h-32 w-32 rounded-full border-4 border-white mx-auto md:mx-0 shadow-md"
-                    src={avatarPreview || profileData.avatar || `https://ui-avatars.com/api/?name=${profileData.username}&background=random`}
+                    src={avatarPreview || profileData.avatar || getDefaultAvatar(profileData.username)}
                     alt={profileData.username}
                   />
                   {isOwnProfile && (
@@ -1157,7 +1678,7 @@ const Profile = () => {
                 <div className="pr-12">
                   <h1 className="text-2xl font-bold text-gray-900">{profileData.username}</h1>
                   <p className="text-lg text-gray-600 mt-1">
-                    {profileData.position || profileData.title}
+                    {profileData.position || profileData.title || '未设置职业'}
                     {profileData.company && (
                       <>
                         <span className="mx-2 text-gray-400">·</span>
@@ -1171,30 +1692,24 @@ const Profile = () => {
                       {profileData.location}
                     </p>
                   )}
-                  {profileData.website && (
-                    <p className="text-gray-500 flex items-center justify-center md:justify-start mt-1">
-                      <LinkIcon className="h-4 w-4 mr-1.5" />
-                      <a href={profileData.website} target="_blank" rel="noopener noreferrer" className="hover:text-blue-500 transition-colors">
-                        {profileData.website}
-                      </a>
-                    </p>
+                  {profileData.socialLinks && Object.keys(profileData.socialLinks).length > 0 && (
+                    <div className="flex flex-wrap items-center justify-center md:justify-start gap-2 mt-2">
+                      {Object.entries(profileData.socialLinks).map(([platform, url]) => (
+                        <a
+                          key={platform}
+                          href={url as string}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-gray-600 hover:text-blue-500 transition-colors flex items-center gap-1"
+                        >
+                          <LinkIcon className="h-3 w-3" />
+                          <span>{platform}</span>
+                        </a>
+                      ))}
+                    </div>
                   )}
                 </div>
 
-                <div className="flex flex-wrap justify-center md:justify-start gap-3 mt-5">
-                  <div className="text-center px-4 py-2 bg-blue-50/60 rounded-xl border border-blue-100/80 backdrop-blur-sm min-w-[70px]">
-                    <p className="text-xl font-bold text-blue-500">{profileData.stats?.files || 0}</p>
-                    <p className="text-xs text-blue-400 font-medium mt-0.5">文件</p>
-                  </div>
-                  <div className="text-center px-4 py-2 bg-purple-50/60 rounded-xl border border-purple-100/80 backdrop-blur-sm min-w-[70px]">
-                    <p className="text-xl font-bold text-purple-500">{profileData.stats?.followers || 0}</p>
-                    <p className="text-xs text-purple-400 font-medium mt-0.5">关注者</p>
-                  </div>
-                  <div className="text-center px-4 py-2 bg-pink-50/60 rounded-xl border border-pink-100/80 backdrop-blur-sm min-w-[70px]">
-                    <p className="text-xl font-bold text-pink-500">{profileData.stats?.following || 0}</p>
-                    <p className="text-xs text-pink-400 font-medium mt-0.5">关注</p>
-                  </div>
-                </div>
 
                 <div className="mt-5 flex flex-wrap justify-center md:justify-start gap-2">
                   {!isOwnProfile && (
@@ -1212,14 +1727,24 @@ const Profile = () => {
                   {!isOwnProfile && (
                     <button
                       onClick={() => {
-                        setActiveTab('more');
+                        setActiveTab('messages');
+                        // 获取留言数据
+                        if (profileData?.id) {
+                          fetchMessages();
+                        }
                         // 滚动到留言区域
                         setTimeout(() => {
                           const messagesSection = document.getElementById('messages-section');
                           if (messagesSection) {
                             messagesSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                          } else {
+                            // 如果找不到，尝试滚动到标签页区域
+                            const tabsSection = document.querySelector('[data-tabs-section]');
+                            if (tabsSection) {
+                              tabsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
                           }
-                        }, 100);
+                          }
+                        }, 200);
                       }}
                       className="px-4 py-2 border border-gray-200/80 text-gray-600 rounded-lg hover:bg-gray-50/80 hover:border-gray-300/80 transition-all duration-200 text-sm font-medium flex items-center gap-1.5"
                     >
@@ -1274,68 +1799,93 @@ const Profile = () => {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-1.5">
-                        <LinkIcon className="w-4 h-4 text-gray-500" />
-                        网站
-                      </label>
-                      <div className="relative">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                          <span className="text-gray-400 text-sm">https://</span>
-                        </div>
-                        <input
-                          type="text"
-                          name="website"
-                          value={editData.website?.replace(/^https?:\/\//, '') || ''}
-                          onChange={(e) => {
-                            let value = e.target.value.trim();
-                            // 移除用户可能输入的协议前缀
-                            value = value.replace(/^https?:\/\//, '').replace(/^http:\/\//, '');
-                            // 调用handleEditChange，但传入完整的URL
-                            const syntheticEvent = {
-                              target: {
-                                name: 'website',
-                                value: value ? `https://${value}` : ''
-                              }
-                            } as React.ChangeEvent<HTMLInputElement>;
-                            handleEditChange(syntheticEvent);
-                          }}
-                          className="w-full pl-16 pr-10 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:border-blue-300 bg-white transition-all text-sm"
-                          placeholder="example.com"
-                        />
-                        {editData.website && editData.website.replace(/^https?:\/\//, '').trim() && (
-                          <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
-                            <a
-                              href={editData.website}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-blue-500 hover:text-blue-600 transition-colors p-1 rounded hover:bg-blue-50"
-                              title="在新标签页中打开"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                              </svg>
-                            </a>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">职业</label>
+                      <input
+                        type="text"
+                        name="position"
+                        value={editData.position}
+                        onChange={handleEditChange}
+                        className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:border-blue-300 bg-white transition-all text-sm"
+                        placeholder="例如：前端开发工程师"
+                      />
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">目前所在公司</label>
+                    <input
+                      type="text"
+                      name="company"
+                      value={editData.company}
+                      onChange={handleEditChange}
+                      className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:border-blue-300 bg-white transition-all text-sm"
+                      placeholder="例如：XX科技有限公司"
+                    />
+                  </div>
+
+                  {/* 多个社交链接 */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-1.5">
+                      <LinkIcon className="w-4 h-4 text-gray-500" />
+                      社交链接
+                    </label>
+                    <div className="space-y-3">
+                      {editData.socialLinks.map((link, index) => (
+                        <div key={index} className="flex gap-2">
+                          <input
+                            type="text"
+                            value={link.platform}
+                            onChange={(e) => {
+                              const newLinks = [...editData.socialLinks];
+                              newLinks[index].platform = e.target.value;
+                              setEditData({ ...editData, socialLinks: newLinks });
+                            }}
+                            className="flex-1 px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:border-blue-300 bg-white transition-all text-sm"
+                            placeholder="链接说明（如：GitHub、博客等）"
+                          />
+                          <div className="flex-1 relative">
+                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                              <span className="text-gray-400 text-sm">https://</span>
+                            </div>
+                            <input
+                              type="text"
+                              value={link.url.replace(/^https?:\/\//, '')}
+                              onChange={(e) => {
+                                let value = e.target.value.trim();
+                                value = value.replace(/^https?:\/\//, '').replace(/^http:\/\//, '');
+                                const newLinks = [...editData.socialLinks];
+                                newLinks[index].url = value ? `https://${value}` : '';
+                                setEditData({ ...editData, socialLinks: newLinks });
+                              }}
+                              className="w-full pl-16 pr-3 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:border-blue-300 bg-white transition-all text-sm"
+                              placeholder="example.com"
+                            />
                           </div>
-                        )}
-                      </div>
-                      {editData.website && editData.website.replace(/^https?:\/\//, '').trim() && (
-                        <p className="mt-1.5 text-xs text-gray-500 flex items-center gap-1.5">
-                          <svg className="w-3.5 h-3.5 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                          <span className="text-gray-600">预览：</span>
-                          <a 
-                            href={editData.website} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="text-blue-500 hover:text-blue-600 hover:underline truncate max-w-[200px] inline-block"
-                            title={editData.website}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newLinks = editData.socialLinks.filter((_, i) => i !== index);
+                              setEditData({ ...editData, socialLinks: newLinks });
+                            }}
+                            className="px-3 py-2.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                           >
-                            {editData.website}
-                          </a>
-                        </p>
-                      )}
+                            <Trash2Icon className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditData({
+                            ...editData,
+                            socialLinks: [...editData.socialLinks, { platform: '', url: '' }]
+                          });
+                        }}
+                        className="w-full px-4 py-2.5 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-blue-400 hover:text-blue-600 transition-colors flex items-center justify-center gap-2"
+                      >
+                        <PlusIcon className="w-4 h-4" />
+                        <span>添加链接</span>
+                      </button>
                     </div>
                   </div>
 
@@ -1362,6 +1912,28 @@ const Profile = () => {
                       <p className="text-gray-400 italic text-sm pl-5">该用户还未设置个人简介</p>
                     )}
                   </div>
+
+                  {/* 职业和公司信息 */}
+                  {(profileData.position || profileData.company) && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-1.5">
+                        <BriefcaseIcon className="w-4 h-4 text-gray-500" />
+                        职业信息
+                      </h3>
+                      <div className="pl-5 space-y-1">
+                        {profileData.position && (
+                          <p className="text-gray-700 text-sm">
+                            <span className="font-medium">职业：</span>{profileData.position}
+                          </p>
+                        )}
+                        {profileData.company && (
+                          <p className="text-gray-700 text-sm">
+                            <span className="font-medium">公司：</span>{profileData.company}
+                          </p>
+                        )}
+                      </div>
+                </div>
+              )}
 
                 </div>
               )}
@@ -1533,7 +2105,7 @@ const Profile = () => {
                       <div className="animate-spin rounded-full h-10 w-10 border-[3px] border-blue-200 border-t-blue-500"></div>
                     </div>
                   ) : experiences.length > 0 ? (
-              <div className="space-y-6">
+              <div className="space-y-6 max-h-96 overflow-y-auto pr-2">
                 {experiences.map((exp) => (
                   <div key={exp.id} className="relative pb-6 last:pb-0 border-l-2 border-blue-100 pl-6 ml-3">
                     <div className="absolute -left-[9px] top-0 w-4 h-4 bg-white border-[3px] border-blue-300 rounded-full"></div>
@@ -1623,7 +2195,7 @@ const Profile = () => {
                       <div className="animate-spin rounded-full h-10 w-10 border-[3px] border-purple-200 border-t-purple-500"></div>
                     </div>
                   ) : educations.length > 0 ? (
-              <div className="space-y-6">
+              <div className="space-y-6 max-h-96 overflow-y-auto pr-2">
                 {educations.map((edu) => (
                   <div key={edu.id} className="relative pb-6 last:pb-0 border-l-2 border-purple-100 pl-6 ml-3">
                     <div className="absolute -left-[9px] top-0 w-4 h-4 bg-white border-[3px] border-purple-300 rounded-full"></div>
@@ -1698,9 +2270,39 @@ const Profile = () => {
             <nav className="flex space-x-1 px-6 bg-gray-50/30 rounded-t-2xl">
               <button
                 className={`py-4 px-6 border-b-2 text-sm font-medium transition-all duration-200 ${
-                  activeTab === 'files'
+                  activeTab === 'all'
                     ? 'border-blue-300 text-blue-500 bg-blue-50/40'
                     : 'border-transparent text-gray-500 hover:text-blue-400 hover:bg-blue-50/20'
+                }`}
+                onClick={() => setActiveTab('all')}
+              >
+                我的动态
+              </button>
+              <button
+                className={`py-4 px-6 border-b-2 text-sm font-medium transition-all duration-200 ${
+                  activeTab === 'posts'
+                    ? 'border-purple-300 text-purple-500 bg-purple-50/40'
+                    : 'border-transparent text-gray-500 hover:text-purple-400 hover:bg-purple-50/20'
+                }`}
+                onClick={() => setActiveTab('posts')}
+              >
+                帖子
+              </button>
+              <button
+                className={`py-4 px-6 border-b-2 text-sm font-medium transition-all duration-200 ${
+                  activeTab === 'articles'
+                    ? 'border-green-300 text-green-500 bg-green-50/40'
+                    : 'border-transparent text-gray-500 hover:text-green-400 hover:bg-green-50/20'
+                }`}
+                onClick={() => setActiveTab('articles')}
+              >
+                文章
+              </button>
+              <button
+                className={`py-4 px-6 border-b-2 text-sm font-medium transition-all duration-200 ${
+                  activeTab === 'files'
+                    ? 'border-orange-300 text-orange-500 bg-orange-50/40'
+                    : 'border-transparent text-gray-500 hover:text-orange-400 hover:bg-orange-50/20'
                 }`}
                 onClick={() => setActiveTab('files')}
               >
@@ -1708,196 +2310,432 @@ const Profile = () => {
               </button>
               <button
                 className={`py-4 px-6 border-b-2 text-sm font-medium transition-all duration-200 ${
-                  activeTab === 'about'
-                    ? 'border-purple-300 text-purple-500 bg-purple-50/40'
-                    : 'border-transparent text-gray-500 hover:text-purple-400 hover:bg-purple-50/20'
+                  activeTab === 'messages'
+                    ? 'border-cyan-300 text-cyan-500 bg-cyan-50/40'
+                    : 'border-transparent text-gray-500 hover:text-cyan-400 hover:bg-cyan-50/20'
                 }`}
-                onClick={() => setActiveTab('about')}
+                onClick={() => {
+                  setActiveTab('messages');
+                  if (profileData?.id) {
+                    fetchMessages();
+                  }
+                }}
               >
-                关于
-              </button>
-              {/* <button
-                className={`py-4 px-6 border-b-2 text-sm font-medium transition-all duration-200 ${
-                  activeTab === 'connections'
-                    ? 'border-pink-300 text-pink-500 bg-pink-50/40'
-                    : 'border-transparent text-gray-500 hover:text-pink-400 hover:bg-pink-50/20'
-                }`}
-                onClick={() => setActiveTab('connections')}
-              >
-                连接
-              </button> */}
-              <button
-                className={`py-4 px-6 border-b-2 text-sm font-medium transition-all duration-200 ${
-                  activeTab === 'more'
-                    ? 'border-green-300 text-green-500 bg-green-50/40'
-                    : 'border-transparent text-gray-500 hover:text-green-400 hover:bg-green-50/20'
-                }`}
-                onClick={() => setActiveTab('more')}
-              >
-                更多
+                留言
               </button>
             </nav>
           </div>
 
           <div className="p-6">
-            {activeTab === 'files' && (
+            {activeTab === 'all' && (
               <div>
-                {filesLoading ? (
+                {contentLoading ? (
                   <div className="flex justify-center py-12">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
                   </div>
-                ) : userActivity.length > 0 ? (
-                  <div className="space-y-4">
-                    {userActivity.map((activity) => (
-                      activity.type === 'file_upload' || activity.originalName ? (
-                        // 文件类型活动
-                        <div key={activity.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                          <div className="flex items-start">
-                            <div className="flex-shrink-0">
-                              <FileIcon className="h-8 w-8 text-blue-500" />
-                            </div>
-                            <div className="ml-3 flex-1">
-                              <div className="flex items-center justify-between mb-1">
-                                <h4 className="text-sm font-medium text-gray-900 truncate flex-1">{activity.title || activity.originalName}</h4>
-                                {/* 权限标签 */}
-                                {activity.visibility && (
-                                  <span className={`ml-2 px-2 py-0.5 rounded-full text-xs font-medium ${
-                                    activity.visibility === 'public' 
-                                      ? 'bg-green-100 text-green-700 border border-green-200' 
-                                      : activity.visibility === 'followers'
-                                      ? 'bg-blue-100 text-blue-700 border border-blue-200'
-                                      : 'bg-gray-100 text-gray-700 border border-gray-200'
-                                  }`}>
-                                    {activity.visibility === 'public' ? '公开' : activity.visibility === 'followers' ? '仅关注者' : '私有'}
-                                  </span>
-                                )}
-                              </div>
-                              <p className="text-xs text-gray-500">{activity.originalName}</p>
-                              <div className="mt-2 flex items-center justify-between">
-                                <span className="text-xs text-gray-500">{(activity.size / 1024).toFixed(1)} KB</span>
-                                <span className="text-xs text-gray-500">{activity.mimeType || '未知类型'}</span>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="mt-3 flex justify-between text-xs text-gray-500">
-                            <span>{activity.downloadCount || 0} 次下载</span>
-                            <span>{new Date(activity.uploadedAt).toLocaleDateString()}</span>
-                          </div>
-                        </div>
-                      ) : activity.type === 'article' || activity.articleUrl ? (
-                        // 文章类型活动
-                        <div key={activity.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                          <div className="flex items-start">
-                            <div className="flex-shrink-0">
-                              <FileTextIcon className="h-8 w-8 text-green-500" />
-                            </div>
-                            <div className="ml-3 flex-1">
-                              <h4 className="text-sm font-medium text-gray-900 truncate">{activity.title}</h4>
-                              <p className="text-xs text-gray-500">{activity.description || activity.summary}</p>
-                              <div className="mt-2 flex items-center justify-between">
-                                <span className="text-xs text-gray-500">{activity.readTime || '3分钟'}阅读</span>
-                                <span className="text-xs text-gray-500">{activity.claps || activity.likeCount || 0} 点赞</span>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="mt-3 flex justify-between text-xs text-gray-500">
-                            <span>文章</span>
-                            <span>{new Date(activity.publishedAt || activity.createdAt).toLocaleDateString()}</span>
-                          </div>
-                        </div>
-                      ) : activity.type === 'image_post' || activity.mediaUrl ? (
-                        // 图片类型活动
-                        <div key={activity.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                          <div className="flex items-start">
-                            <div className="flex-shrink-0">
-                              <ImageIcon className="h-8 w-8 text-purple-500" />
-                            </div>
-                            <div className="ml-3 flex-1">
-                              <h4 className="text-sm font-medium text-gray-900 truncate">{activity.title || '图片分享'}</h4>
-                              <p className="text-xs text-gray-500">{activity.caption || activity.description}</p>
-                              <div className="mt-2 flex items-center justify-between">
-                                <span className="text-xs text-gray-500">{activity.likeCount || 0} 点赞</span>
-                                <span className="text-xs text-gray-500">{activity.commentCount || 0} 评论</span>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="mt-3 rounded-lg overflow-hidden">
-                            <img
-                              src={activity.mediaUrl}
-                              alt={activity.caption || activity.title}
-                              className="w-full h-48 object-cover rounded-lg"
-                            />
-                          </div>
-                          <div className="mt-2 flex justify-between text-xs text-gray-500">
-                            <span>图片</span>
-                            <span>{new Date(activity.createdAt).toLocaleDateString()}</span>
-                          </div>
-                        </div>
-                      ) : (
-                        // 默认活动类型
-                        <div key={activity.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                          <div className="flex items-start">
-                            <div className="flex-shrink-0">
-                              <FileIcon className="h-8 w-8 text-indigo-500" />
-                            </div>
-                            <div className="ml-3 flex-1">
-                              <h4 className="text-sm font-medium text-gray-900 truncate">{activity.title || '活动'}</h4>
-                              <p className="text-xs text-gray-500">{activity.content || activity.description}</p>
-                              <div className="mt-2 flex items-center justify-between">
-                                <span className="text-xs text-gray-500">{activity.likeCount || 0} 点赞</span>
-                                <span className="text-xs text-gray-500">{activity.commentCount || 0} 评论</span>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="mt-3 flex justify-between text-xs text-gray-500">
-                            <span>{activity.type || '分享'}</span>
-                            <span>{new Date(activity.createdAt).toLocaleDateString()}</span>
-                          </div>
-                        </div>
-                      )
-                    ))}
-                  </div>
                 ) : (
-                  <div className="text-center py-12">
-                    <UserIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">暂无内容</h3>
-                    <p className="text-gray-500">此用户还没有任何分享</p>
-                  </div>
+                  <PostFeed
+                    posts={userActivity.map((activity) => {
+                      // 根据活动类型转换为PostCardPost格式
+                      if (activity.type === 'file_upload' || activity.originalName) {
+                        // 文件类型
+                        const isImage = activity.mimeType?.startsWith('image/');
+                        const isVideo = activity.mimeType?.startsWith('video/');
+                        return {
+                          id: activity.id,
+                          originalId: activity.originalId,
+                          authorId: profileData?.id,
+                          author: {
+                            name: profileData?.username || username || '用户',
+                            title: profileData?.position || '',
+                            company: profileData?.company || '',
+                            avatar: profileData?.avatar || getDefaultAvatar(profileData?.username || username || ''),
+                          },
+                          content: activity.description || activity.title || '分享了一个文件',
+                          timestamp: new Date(activity.uploadedAt || activity.createdAt).toLocaleString('zh-CN'),
+                          likes: activity.likeCount || 0,
+                          comments: activity.commentCount || 0,
+                          liked: false,
+                          contentType: isImage ? 'image' as const : isVideo ? 'video' as const : 'file' as const,
+                          mediaUrl: activity.fileUrl || undefined,
+                          title: activity.title || activity.originalName,
+                          originalName: activity.originalName,
+                          size: activity.size,
+                          mimeType: activity.mimeType,
+                          description: activity.description,
+                        } as PostCardPost;
+                      } else if (activity.type === 'article' || activity.articleUrl) {
+                        // 文章类型
+                        return {
+                          id: activity.id,
+                          originalId: activity.originalId,
+                          authorId: profileData?.id,
+                          author: {
+                            name: profileData?.username || username || '用户',
+                            title: profileData?.position || '',
+                            company: profileData?.company || '',
+                            avatar: profileData?.avatar || getDefaultAvatar(profileData?.username || username || ''),
+                          },
+                          content: activity.description || activity.summary || '',
+                          timestamp: new Date(activity.publishedAt || activity.createdAt).toLocaleString('zh-CN'),
+                          likes: activity.claps || activity.likeCount || 0,
+                          comments: activity.commentCount || 0,
+                          liked: false,
+                          contentType: 'article' as const,
+                          title: activity.title,
+                          description: activity.description || activity.summary || '',
+                          readTime: activity.readTime || '3分钟',
+                        } as PostCardPost;
+                      } else if (activity.type === 'image_post' || activity.type === 'video_post' || activity.mediaUrl) {
+                        // 图片或视频类型
+                        const isVideo = activity.type === 'video_post' || activity.mediaType === 'video';
+                        return {
+                          id: activity.id,
+                          originalId: activity.originalId,
+                          authorId: profileData?.id,
+                          author: {
+                            name: profileData?.username || username || '用户',
+                            title: profileData?.position || '',
+                            company: profileData?.company || '',
+                            avatar: profileData?.avatar || getDefaultAvatar(profileData?.username || username || ''),
+                          },
+                          content: activity.caption || activity.description || activity.content || '',
+                          timestamp: new Date(activity.createdAt).toLocaleString('zh-CN'),
+                          likes: activity.likeCount || 0,
+                          comments: activity.commentCount || 0,
+                          liked: false,
+                          contentType: isVideo ? 'video' as const : 'image' as const,
+                          mediaUrl: activity.mediaUrl || undefined,
+                        } as PostCardPost;
+                      } else {
+                        // 默认类型
+                        return {
+                          id: activity.id,
+                          originalId: activity.originalId,
+                          authorId: profileData?.id,
+                          author: {
+                            name: profileData?.username || username || '用户',
+                            title: profileData?.position || '',
+                            company: profileData?.company || '',
+                            avatar: profileData?.avatar || getDefaultAvatar(profileData?.username || username || ''),
+                          },
+                          content: activity.content || activity.description || activity.title || '',
+                          timestamp: new Date(activity.createdAt).toLocaleString('zh-CN'),
+                          likes: activity.likeCount || 0,
+                          comments: activity.commentCount || 0,
+                          liked: false,
+                        } as PostCardPost;
+                      }
+                    })}
+                    currentUserId={currentUser?.id}
+                    contentFilter="all"
+                    showFilter={false}
+                    onLike={handleLike}
+                    onToggleComments={handleToggleComments}
+                    onAddComment={handleAddComment}
+                    onDeleteComment={handleDeleteComment}
+                    postComments={postComments}
+                    loadingComments={loadingComments}
+                    expandedComments={expandedComments}
+                    onImageModalOpen={(imageUrl, title, mediaType) => openPreviewModal(imageUrl, mediaType, title)}
+                    showActions={false}
+                    emptyStateTitle="暂无内容"
+                    emptyStateDescription="此用户还没有任何分享"
+                  />
                 )}
               </div>
             )}
 
-            {activeTab === 'about' && (
+            {activeTab === 'posts' && (
               <div>
-                <h3 className="text-lg font-medium text-gray-900 mb-4">关于 {profileData.username}</h3>
-                <div className="space-y-6">
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-900">个人简介</h4>
-                    <p className="mt-1 text-sm text-gray-600">{profileData.bio || '该用户还未设置个人简介'}</p>
+                {contentLoading ? (
+                  <div className="flex justify-center py-12">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
                   </div>
-                  
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-900">位置</h4>
-                    <p className="mt-1 text-sm text-gray-600">{profileData.location || '未设置位置'}</p>
+                ) : (
+                  <PostFeed
+                    posts={userPosts.map((post) => {
+                      // 判断是图片还是视频
+                      const mediaUrl = post.image_url || post.mediaUrl || '';
+                      const isVideo = mediaUrl && (
+                        mediaUrl.toLowerCase().endsWith('.mp4') ||
+                        mediaUrl.toLowerCase().endsWith('.webm') ||
+                        mediaUrl.toLowerCase().endsWith('.ogg') ||
+                        mediaUrl.toLowerCase().endsWith('.mov') ||
+                        post.mime_type?.startsWith('video/') ||
+                        post.mediaType === 'video'
+                      );
+                      
+                      // 转换为 PostCard 需要的格式
+                      return {
+                        id: post.id,
+                        originalId: post.id,
+                        authorId: profileData?.id,
+                        author: {
+                          name: profileData?.username || username || '用户',
+                          title: profileData?.position || '',
+                          company: profileData?.company || '',
+                          avatar: profileData?.avatar || getDefaultAvatar(profileData?.username || username || ''),
+                        },
+                        content: post.content || post.caption || post.description || '',
+                        timestamp: new Date(post.createdAt || post.created_at).toLocaleString('zh-CN'),
+                        likes: post.likeCount || post.like_count || 0,
+                        comments: post.commentCount || post.comment_count || 0,
+                        liked: post.liked || false,
+                        contentType: isVideo ? 'video' : (mediaUrl ? 'image' : undefined),
+                        mediaUrl: mediaUrl || undefined,
+                      } as PostCardPost;
+                    })}
+                    currentUserId={currentUser?.id}
+                    contentFilter="posts"
+                    showFilter={false}
+                    onLike={handleLike}
+                    onToggleComments={handleToggleComments}
+                    onAddComment={handleAddComment}
+                    onDeleteComment={handleDeleteComment}
+                    postComments={postComments}
+                    loadingComments={loadingComments}
+                    expandedComments={expandedComments}
+                    onImageModalOpen={(imageUrl, title, mediaType) => openPreviewModal(imageUrl, mediaType, title)}
+                    showActions={false}
+                    emptyStateTitle="暂无帖子"
+                    emptyStateDescription="此用户还没有发布任何帖子"
+                  />
+                )}
+              </div>
+            )}
+
+            {activeTab === 'articles' && (
+              <div>
+                {contentLoading ? (
+                  <div className="flex justify-center py-12">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
                   </div>
-                  
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-900">网站</h4>
-                    <p className="mt-1 text-sm text-gray-600">
-                      {profileData.website ? (
-                        <a href={profileData.website} className="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer">
-                          {profileData.website}
-                        </a>
-                      ) : '未设置网站'}
+                ) : (
+                  <PostFeed
+                    posts={userArticles.map((article) => ({
+                      id: article.id,
+                      originalId: article.id,
+                      authorId: profileData?.id,
+                      author: {
+                        name: profileData?.username || username || '用户',
+                        title: profileData?.position || '',
+                        company: profileData?.company || '',
+                        avatar: profileData?.avatar || getDefaultAvatar(profileData?.username || username || ''),
+                      },
+                      content: article.summary || article.content?.substring(0, 200) || '',
+                      timestamp: new Date(article.createdAt || article.created_at).toLocaleString('zh-CN'),
+                      likes: article.likeCount || article.like_count || 0,
+                      comments: article.commentCount || article.comment_count || 0,
+                      liked: article.liked || false,
+                      contentType: 'article' as const,
+                      title: article.title,
+                      description: article.summary || article.content?.substring(0, 200) || '',
+                      readTime: `${Math.ceil((article.content?.length || 0) / 500)}分钟`,
+                    } as PostCardPost))}
+                    currentUserId={currentUser?.id}
+                    contentFilter="articles"
+                    showFilter={false}
+                    onLike={handleLike}
+                    onToggleComments={handleToggleComments}
+                    onAddComment={handleAddComment}
+                    onDeleteComment={handleDeleteComment}
+                    postComments={postComments}
+                    loadingComments={loadingComments}
+                    expandedComments={expandedComments}
+                    showActions={false}
+                    emptyStateTitle="暂无文章"
+                    emptyStateDescription="此用户还没有发布任何文章"
+                  />
+                )}
+              </div>
+            )}
+
+            {activeTab === 'files' && (
+              <div>
+                {contentLoading ? (
+                  <div className="flex justify-center py-12">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600"></div>
+                  </div>
+                ) : (
+                  <PostFeed
+                    posts={userFiles.map((file) => {
+                      const isImage = file.mime_type?.startsWith('image/');
+                      const isVideo = file.mime_type?.startsWith('video/');
+                      
+                      return {
+                        id: file.id,
+                        originalId: file.id,
+                        authorId: profileData?.id,
+                        author: {
+                          name: profileData?.username || username || '用户',
+                          title: profileData?.position || '',
+                          company: profileData?.company || '',
+                          avatar: profileData?.avatar || getDefaultAvatar(profileData?.username || username || ''),
+                        },
+                        content: file.description || file.title || '分享了一个文件',
+                        timestamp: new Date(file.uploaded_at || file.uploadedAt).toLocaleString('zh-CN'),
+                        likes: file.likeCount || file.like_count || 0,
+                        comments: file.commentCount || file.comment_count || 0,
+                        liked: file.liked || false,
+                        contentType: isImage ? 'image' as const : isVideo ? 'video' as const : 'file' as const,
+                        mediaUrl: file.file_url || file.fileUrl || undefined,
+                        title: file.title || file.original_name,
+                        originalName: file.original_name,
+                        size: file.size,
+                        mimeType: file.mime_type,
+                        description: file.description,
+                      } as PostCardPost;
+                    })}
+                    currentUserId={currentUser?.id}
+                    contentFilter="files"
+                    showFilter={false}
+                    onLike={handleLike}
+                    onToggleComments={handleToggleComments}
+                    onAddComment={handleAddComment}
+                    onDeleteComment={handleDeleteComment}
+                    postComments={postComments}
+                    loadingComments={loadingComments}
+                    expandedComments={expandedComments}
+                    onImageModalOpen={(imageUrl, title, mediaType) => openPreviewModal(imageUrl, mediaType, title)}
+                    showActions={false}
+                    emptyStateTitle="暂无文件"
+                    emptyStateDescription="此用户还没有上传任何文件"
+                  />
+                )}
+              </div>
+            )}
+
+            {activeTab === 'messages' && (
+              <div id="messages-section">
+                {/* 添加留言表单 */}
+                {currentUser && !isOwnProfile && (
+                  <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <div className="flex items-start space-x-3">
+                      <img
+                        className="h-10 w-10 rounded-full object-cover"
+                        src={currentUser.avatar || getDefaultAvatar(currentUser.username)}
+                        alt={currentUser.username}
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = getDefaultAvatar(currentUser.username);
+                        }}
+                      />
+                      <div className="flex-1">
+                        <textarea
+                          value={messageContent}
+                          onChange={(e) => setMessageContent(e.target.value)}
+                          placeholder="给TA留言..."
+                          rows={3}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-300 resize-none text-sm"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                              e.preventDefault();
+                              handleAddMessage();
+                            }
+                          }}
+                        />
+                        <div className="flex items-center justify-between mt-2">
+                          <p className="text-xs text-gray-500">按 Ctrl+Enter 发送</p>
+                          <button
+                            onClick={handleAddMessage}
+                            disabled={!messageContent.trim() || messagesLoading}
+                            className="px-4 py-1.5 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            发送
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 留言列表 */}
+                {messagesLoading ? (
+                  <div className="flex justify-center py-12">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-600"></div>
+                  </div>
+                ) : messages.length > 0 ? (
+                  <div className="space-y-4">
+                    {messages.map((message: any) => (
+                      <div key={message.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                        <div className="flex items-start space-x-3">
+                          <img
+                            className="h-10 w-10 rounded-full object-cover cursor-pointer"
+                            src={message.avatar || getDefaultAvatar(message.username || message.fromUsername)}
+                            alt={message.username || message.fromUsername}
+                            onClick={() => navigate(`/profile/${message.username || message.fromUsername}`)}
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = getDefaultAvatar(message.username || message.fromUsername);
+                            }}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between mb-1">
+                              <div className="flex items-center space-x-2">
+                                <h4 
+                                  className="text-sm font-semibold text-gray-900 cursor-pointer hover:text-cyan-600"
+                                  onClick={() => navigate(`/profile/${message.username || message.fromUsername}`)}
+                                >
+                                  {message.username || message.fromUsername || '匿名用户'}
+                                </h4>
+                                <span className="text-xs text-gray-500">
+                                  {new Date(message.createdAt || message.created_at).toLocaleString('zh-CN', {
+                                    year: 'numeric',
+                                    month: 'short',
+                                    day: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })}
+                                </span>
+                              </div>
+                            </div>
+                            <p className="text-sm text-gray-700 whitespace-pre-wrap break-words mt-1">
+                              {message.content}
+                            </p>
+                            <div className="flex items-center space-x-4 mt-3">
+                              <button
+                                onClick={() => handleLikeMessage(message.id, message.isLiked || message.liked)}
+                                className={`flex items-center space-x-1 text-xs transition-colors ${
+                                  message.isLiked || message.liked
+                                    ? 'text-red-500 hover:text-red-600'
+                                    : 'text-gray-500 hover:text-red-500'
+                                }`}
+                              >
+                                <HeartIcon className={`w-4 h-4 ${message.isLiked || message.liked ? 'fill-current' : ''}`} />
+                                <span>{message.likeCount || message.like_count || 0}</span>
+                              </button>
+                              {currentUser && (currentUser.id === message.userId || currentUser.id === message.user_id) && (
+                                <button
+                                  onClick={async () => {
+                                    if (window.confirm('确定要删除这条留言吗？')) {
+                                      try {
+                                        await deleteMessage(message.id);
+                                        setMessages(prev => prev.filter(msg => msg.id !== message.id));
+                                      } catch (err: any) {
+                                        console.error('删除留言失败:', err);
+                                        setError(err.message || '删除留言失败');
+                                      }
+                                    }
+                                  }}
+                                  className="text-xs text-gray-500 hover:text-red-500 transition-colors"
+                                >
+                                  删除
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-12">
+                    <MessageSquareIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">暂无留言</h3>
+                    <p className="text-gray-500">
+                      {isOwnProfile ? '还没有人给你留言' : '成为第一个给TA留言的人吧'}
                     </p>
                   </div>
-                  
-                  <div className="pt-4 border-t border-gray-200">
-                    <p className="text-xs text-gray-500">
-                      工作经历、教育经历和技能请查看主页面的独立卡片区域
-                    </p>
-                  </div>
-                </div>
+                )}
               </div>
             )}
 
@@ -1927,7 +2765,7 @@ const Profile = () => {
                           <div key={follower.id} className="flex items-center p-3 border border-gray-200 rounded-lg">
                             <img
                               className="h-10 w-10 rounded-full"
-                              src={follower.avatar || `https://ui-avatars.com/api/?name=${follower.username}&background=random`}
+                              src={follower.avatar || getDefaultAvatar(follower.username)}
                               alt={follower.username}
                             />
                             <div className="ml-3 flex-1">
@@ -1968,7 +2806,7 @@ const Profile = () => {
                           <div key={followedUser.id} className="flex items-center p-3 border border-gray-200 rounded-lg">
                             <img
                               className="h-10 w-10 rounded-full"
-                              src={followedUser.avatar || `https://ui-avatars.com/api/?name=${followedUser.username}&background=random`}
+                              src={followedUser.avatar || getDefaultAvatar(followedUser.username)}
                               alt={followedUser.username}
                             />
                             <div className="ml-3 flex-1">
@@ -1991,92 +2829,6 @@ const Profile = () => {
               </div>
             )} */}
 
-            {activeTab === 'more' && (
-              <div id="messages-section">
-                <h3 className="text-lg font-medium text-gray-900 mb-4">留言</h3>
-
-                {/* 发表留言区域 */}
-                {!isOwnProfile && (
-                  <div className="mb-6">
-                    <div className="flex items-start space-x-3">
-                      <img
-                        className="h-10 w-10 rounded-full"
-                        src={currentUser?.avatar || `https://ui-avatars.com/api/?name=${currentUser?.username || 'User'}&background=random`}
-                        alt={currentUser?.username}
-                      />
-                      <div className="flex-1">
-                        <textarea
-                          value={messageContent}
-                          onChange={(e) => setMessageContent(e.target.value)}
-                          placeholder={`给 ${profileData.username} 留个言吧...`}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                          rows="3"
-                        />
-                        <div className="mt-2 flex justify-end">
-                          <button
-                            onClick={handleAddMessage}
-                            disabled={!messageContent.trim()}
-                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            发表
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* 留言列表 */}
-                <div>
-                  {messagesLoading ? (
-                    <div className="flex justify-center py-4">
-                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                    </div>
-                  ) : messages.length > 0 ? (
-                    <div className="space-y-4">
-                      {messages.map((message) => (
-                        <div key={message.id} className="flex items-start space-x-3 p-4 border border-gray-200 rounded-lg">
-                          <img
-                            className="h-10 w-10 rounded-full"
-                            src={message.avatar || `https://ui-avatars.com/api/?name=${message.username}&background=random`}
-                            alt={message.username}
-                          />
-                          <div className="flex-1">
-                            <div className="flex items-center">
-                              <h4 className="text-sm font-medium text-gray-900">{message.username}</h4>
-                              <span className="mx-2 text-gray-400">•</span>
-                              <span className="text-xs text-gray-500">
-                                {new Date(message.createdAt).toLocaleString()}
-                              </span>
-                            </div>
-                            <p className="mt-1 text-gray-700">{message.content}</p>
-                            <div className="mt-2 flex items-center space-x-4">
-                              <button
-                                onClick={() => handleLikeMessage(message.id, message.isLiked)}
-                                className={`flex items-center space-x-1 ${
-                                  message.isLiked ? 'text-red-500' : 'text-gray-500 hover:text-red-500'
-                                }`}
-                              >
-                                <HeartIcon className={`h-4 w-4 ${message.isLiked ? 'fill-current' : ''}`} />
-                                <span className="text-xs">{message.likeCount || 0}</span>
-                              </button>
-                              <button className="flex items-center space-x-1 text-gray-500 hover:text-blue-500">
-                                <MessageCircleIcon className="h-4 w-4" />
-                                <span className="text-xs">回复</span>
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-4 text-gray-500">
-                      暂无留言
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>

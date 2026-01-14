@@ -114,6 +114,49 @@ export const deletePost = async (postId: number) => {
  * 点赞/取消点赞帖子
  */
 export const togglePostLike = async (postId: number) => {
-  return api.post<{ code: number; data: { liked: boolean } }>(`/posts/${postId}/like`);
+  return api.post<{ code: number; data: { liked: boolean; likeCount: number } }>(`/posts/${postId}/like`);
+};
+
+export interface Comment {
+  id: number;
+  post_id?: number;
+  article_id?: number;
+  file_id?: number;
+  user_id: number;
+  content: string;
+  created_at: string;
+  updated_at: string;
+  username: string;
+  avatar: string | null;
+}
+
+export interface CommentsResponse {
+  comments: Comment[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+  };
+}
+
+/**
+ * 添加帖子评论
+ */
+export const addPostComment = async (postId: number, content: string) => {
+  return api.post<{ code: number; data: { comment: Comment } }>(`/posts/${postId}/comments`, { content });
+};
+
+/**
+ * 获取帖子评论列表
+ */
+export const getPostComments = async (postId: number, params?: { page?: number; limit?: number }) => {
+  return api.get<{ code: number; data: CommentsResponse }>(`/posts/${postId}/comments`, { params });
+};
+
+/**
+ * 删除帖子评论
+ */
+export const deletePostComment = async (postId: number, commentId: number) => {
+  return api.delete<{ code: number; data: null }>(`/posts/${postId}/comments/${commentId}`);
 };
 

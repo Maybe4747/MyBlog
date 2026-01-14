@@ -140,7 +140,7 @@ router.post('/login', [
 
     // 查找用户（支持用户名或邮箱登录）
     const [users] = await pool.execute(
-      'SELECT id, username, email, passwordHash FROM users WHERE username = ? OR email = ?',
+      'SELECT id, username, email, password FROM users WHERE username = ? OR email = ?',
       [email, email]
     );
 
@@ -155,7 +155,7 @@ router.post('/login', [
     const user = users[0];
 
     // 验证密码
-    const isValidPassword = await bcrypt.compare(password, user.passwordHash);
+    const isValidPassword = await bcrypt.compare(password, user.password);
     if (!isValidPassword) {
       return res.status(401).json({
         code: 1,

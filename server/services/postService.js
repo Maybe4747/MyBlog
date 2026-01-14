@@ -1,4 +1,5 @@
 import { getMySQLPool } from '../config/database.js';
+import { createNotification, getUsername } from '../utils/notificationHelper.js';
 
 /**
  * 创建帖子
@@ -55,7 +56,8 @@ export const getPosts = async (options = {}) => {
     page = 1, 
     limit = 20, 
     visibility = 'public',
-    currentUserId = null 
+    currentUserId = null,
+    search = null
   } = options;
   
   let query = `SELECT p.*, u.username, u.avatar, u.email
@@ -67,6 +69,12 @@ export const getPosts = async (options = {}) => {
   if (userId) {
     query += ' AND p.user_id = ?';
     params.push(userId);
+  }
+  
+  if (search) {
+    query += ' AND (p.content LIKE ? OR u.username LIKE ?)';
+    const searchTerm = `%${search}%`;
+    params.push(searchTerm, searchTerm);
   }
   
   if (visibility) {
@@ -280,7 +288,16 @@ export const togglePostLike = async (postId, userId) => {
       [postId]
     );
     
-    return { liked: false };
+    // 获取最新的点赞数
+    const [posts] = await pool.execute(
+      'SELECT like_count FROM posts WHERE id = ?',
+      [postId]
+    );
+    
+    return { 
+      liked: false,
+      likeCount: posts[0]?.like_count || 0
+    };
   } else {
     // 添加点赞
     await pool.execute(
@@ -294,7 +311,167 @@ export const togglePostLike = async (postId, userId) => {
       [postId]
     );
     
-    return { liked: true };
+    // 获取帖子信息以创建通知
+    const [posts] = await pool.execute(
+      'SELECT user_id, like_count FROM posts WHERE id = ?',
+      [postId]
+    );
+    
+    const postOwnerId = posts[0]?.user_id;
+    const likeCount = posts[0]?.like_count || 0;
+    
+    // 创建通知（如果帖主不是点赞者本人）
+    if (postOwnerId && postOwnerId !== userId) {
+      const username = await getUsername(userId);
+      await createNotification(
+        postOwnerId,
+        'like',
+        '新的点赞',
+        `${username || '某用户'} 点赞了你的帖子`,
+        userId,
+        username,
+        'post',
+        postId
+      );
+    }
+    
+    return { 
+      liked: true,
+      likeCount: likeCount
+    };
   }
+};
+
+/**
+ * 添加帖子评论
+ */
+export const addPostComment = async (postId, userId, content) => {
+  const pool = getMySQLPool();
+  
+  const [result] = await pool.execute(
+    `INSERT INTO post_comments (post_id, user_id, content) 
+     VALUES (?, ?, ?)`,
+    [postId, userId, content]
+  );
+  
+  const commentId = result.insertId;
+  
+  // 更新帖子评论数
+  await pool.execute(
+    'UPDATE posts SET comment_count = comment_count + 1 WHERE id = ?',
+    [postId]
+  );
+  
+  // 获取完整的评论信息和帖子信息
+  const [comments] = await pool.execute(
+    `SELECT pc.*, u.username, u.avatar
+     FROM post_comments pc
+     JOIN users u ON pc.user_id = u.id
+     WHERE pc.id = ?`,
+    [commentId]
+  );
+  
+  // 获取帖子信息以创建通知
+  const [posts] = await pool.execute(
+    'SELECT user_id FROM posts WHERE id = ?',
+    [postId]
+  );
+  
+  const postOwnerId = posts[0]?.user_id;
+  const comment = comments[0];
+  
+  // 创建通知（如果帖主不是评论者本人）
+  if (postOwnerId && postOwnerId !== userId && comment) {
+    const contentPreview = content.length > 50 ? content.substring(0, 50) + '...' : content;
+    await createNotification(
+      postOwnerId,
+      'comment',
+      '新的评论',
+      `${comment.username || '某用户'} 评论了你的帖子: "${contentPreview}"`,
+      userId,
+      comment.username,
+      'post',
+      postId
+    );
+  }
+  
+  return comment;
+};
+
+/**
+ * 获取帖子评论列表
+ */
+export const getPostComments = async (postId, page = 1, limit = 10) => {
+  const pool = getMySQLPool();
+  
+  // 先计算总数
+  const [countResult] = await pool.execute(
+    'SELECT COUNT(*) as count FROM post_comments WHERE post_id = ?',
+    [postId]
+  );
+  const total = countResult[0].count;
+  
+  // 确保分页参数是整数类型
+  const limitNum = parseInt(limit) || 10;
+  const pageNum = parseInt(page) || 1;
+  const offsetNum = (pageNum - 1) * limitNum;
+  const limitInt = Number(limitNum);
+  const offsetInt = Number(offsetNum);
+  
+  // 使用字符串插值处理 LIMIT 和 OFFSET，避免参数类型问题
+  const [comments] = await pool.execute(
+    `SELECT pc.*, u.username, u.avatar
+     FROM post_comments pc
+     JOIN users u ON pc.user_id = u.id
+     WHERE pc.post_id = ?
+     ORDER BY pc.created_at ASC
+     LIMIT ${limitInt} OFFSET ${offsetInt}`,
+    [postId]
+  );
+  
+  return {
+    comments,
+    pagination: {
+      page: parseInt(page),
+      limit: parseInt(limit),
+      total
+    }
+  };
+};
+
+/**
+ * 删除帖子评论
+ */
+export const deletePostComment = async (commentId, userId) => {
+  const pool = getMySQLPool();
+  
+  // 获取评论信息
+  const [comments] = await pool.execute(
+    'SELECT post_id FROM post_comments WHERE id = ? AND user_id = ?',
+    [commentId, userId]
+  );
+  
+  if (comments.length === 0) {
+    return false;
+  }
+  
+  const postId = comments[0].post_id;
+  
+  // 删除评论
+  const [result] = await pool.execute(
+    'DELETE FROM post_comments WHERE id = ? AND user_id = ?',
+    [commentId, userId]
+  );
+  
+  if (result.affectedRows > 0) {
+    // 更新帖子评论数
+    await pool.execute(
+      'UPDATE posts SET comment_count = GREATEST(comment_count - 1, 0) WHERE id = ?',
+      [postId]
+    );
+    return true;
+  }
+  
+  return false;
 };
 

@@ -83,8 +83,22 @@ export const unlikeFile = async (fileId) => {
 /**
  * 发表评论
  */
-export const commentOnFile = async (fileId, content) => {
-  return api.post('/social/comment', { fileId, content });
+export const commentOnFile = async (fileId: number, content: string) => {
+  return api.post<{ code: number; data: { comment: any } }>('/social/comment', { fileId, content });
+};
+
+/**
+ * 获取文件评论列表
+ */
+export const getFileComments = async (fileId: number, params?: { page?: number; limit?: number }) => {
+  return api.get<{ code: number; data: { comments: any[]; pagination: any } }>(`/social/files/${fileId}/comments`, { params });
+};
+
+/**
+ * 删除文件评论
+ */
+export const deleteFileComment = async (fileId: number, commentId: number) => {
+  return api.delete<{ code: number; data: null }>(`/social/files/${fileId}/comments/${commentId}`);
 };
 
 /**

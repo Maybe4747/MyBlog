@@ -2,6 +2,7 @@ import express from 'express';
 import { body, validationResult } from 'express-validator';
 import { authenticateToken } from '../middleware/auth.js';
 import { getMySQLPool } from '../config/database.js';
+import { createNotification } from '../utils/notificationHelper.js';
 
 const router = express.Router();
 
@@ -17,6 +18,14 @@ router.get('/:profileUserId', async (req, res) => {
 
     const pool = getMySQLPool();
 
+    // 确保分页参数是整数类型
+    const limitNum = parseInt(limit) || 10;
+    const pageNum = parseInt(page) || 1;
+    const offsetNum = (pageNum - 1) * limitNum;
+    const limitInt = Number(limitNum);
+    const offsetInt = Number(offsetNum);
+    const currentUserId = req.user?.id || 0;
+
     // 获取留言列表
     const [messages] = await pool.execute(
       `SELECT m.*, u.username, u.avatar,
@@ -28,8 +37,8 @@ router.get('/:profileUserId', async (req, res) => {
        JOIN users u ON m.user_id = u.id
        WHERE m.profile_user_id = ?
        ORDER BY m.created_at DESC
-       LIMIT ? OFFSET ?`,
-      [req.user?.id || 0, req.user?.id || 0, profileUserId, parseInt(limit), (parseInt(page) - 1) * parseInt(limit)]
+       LIMIT ${limitInt} OFFSET ${offsetInt}`,
+      [currentUserId, currentUserId, profileUserId]
     );
 
     // 获取留言总数
@@ -38,19 +47,40 @@ router.get('/:profileUserId', async (req, res) => {
       [profileUserId]
     );
 
+    // 格式化留言数据
+    const formattedMessages = messages.map(msg => ({
+      id: msg.id,
+      userId: msg.user_id,
+      profileUserId: msg.profile_user_id,
+      username: msg.username,
+      avatar: msg.avatar,
+      content: msg.content,
+      likeCount: msg.like_count || 0,
+      isLiked: (msg.has_liked || 0) > 0,
+      createdAt: msg.created_at,
+      created_at: msg.created_at // 保留原字段以兼容
+    }));
+
     res.json({
-      messages,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total: totalResult[0].total
-      }
+      code: 0,
+      data: {
+        messages: formattedMessages,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: totalResult[0].total
+        }
+      },
+      msg: '获取成功'
     });
 
   } catch (error) {
     console.error('获取留言列表错误:', error);
     res.status(500).json({
-      error: '获取留言列表失败'
+      code: 500,
+      data: null,
+      error: '获取留言列表失败',
+      msg: error.message || '获取留言列表失败'
     });
   }
 });
@@ -121,16 +151,33 @@ router.post('/', authenticateToken, [
         [result.insertId]
       );
 
+      const messageData = newMessage[0];
+
+      // 创建通知（目标用户不是留言者本人）
+      if (profileUserId !== userId && messageData) {
+        const contentPreview = content.length > 50 ? content.substring(0, 50) + '...' : content;
+        await createNotification(
+          profileUserId,
+          'message',
+          '新的留言',
+          `${messageData.username || '某用户'} 给你留言: "${contentPreview}"`,
+          userId,
+          messageData.username,
+          'message',
+          result.insertId
+        );
+      }
+
       res.status(201).json({
         message: '留言成功',
         messageRecord: {
-          id: newMessage[0].id,
-          userId: newMessage[0].user_id,
-          profileUserId: newMessage[0].profile_user_id,
-          username: newMessage[0].username,
-          avatar: newMessage[0].avatar,
-          content: newMessage[0].content,
-          createdAt: newMessage[0].created_at
+          id: messageData.id,
+          userId: messageData.user_id,
+          profileUserId: messageData.profile_user_id,
+          username: messageData.username,
+          avatar: messageData.avatar,
+          content: messageData.content,
+          createdAt: messageData.created_at
         }
       });
     } else {
@@ -218,88 +265,67 @@ router.post('/:messageId/like', authenticateToken, async (req, res) => {
 
     if (messages.length === 0) {
       return res.status(404).json({
-        error: '留言不存在'
+        code: 404,
+        data: null,
+        error: '留言不存在',
+        msg: '留言不存在'
       });
     }
 
     const messageUserId = messages[0].user_id;
 
-    // 检查是否是自己点赞自己的留言
-    if (messageUserId === userId) {
-      return res.status(400).json({
-        error: '不能给自己的留言点赞'
+    // 检查是否已点赞
+    const [existing] = await pool.execute(
+      'SELECT id FROM message_likes WHERE message_id = ? AND user_id = ?',
+      [messageId, userId]
+    );
+
+    if (existing.length > 0) {
+      // 已经点赞，返回成功但不重复点赞
+      const [likes] = await pool.execute(
+        'SELECT COUNT(*) as count FROM message_likes WHERE message_id = ?',
+        [messageId]
+      );
+      
+      return res.json({
+        code: 0,
+        data: {
+          liked: true,
+          likeCount: likes[0].count
+        },
+        msg: '已点赞'
       });
     }
 
     // 点赞留言
-    const [result] = await pool.execute(
+    await pool.execute(
       `INSERT INTO message_likes (message_id, user_id) 
-       VALUES (?, ?)
-       ON DUPLICATE KEY UPDATE created_at = CURRENT_TIMESTAMP`,
+       VALUES (?, ?)`,
       [messageId, userId]
     );
 
-    res.json({
-      message: '留言点赞成功'
-    });
-
-  } catch (error) {
-    console.error('留言点赞错误:', error);
-    res.status(500).json({
-      error: '留言点赞失败'
-    });
-  }
-});
-
-/**
- * @route   POST /api/messages/:messageId/like
- * @desc    点赞留言
- * @access  Private
- */
-router.post('/:messageId/like', authenticateToken, async (req, res) => {
-  try {
-    const { messageId } = req.params;
-    const userId = req.user.id;
-
-    const pool = getMySQLPool();
-
-    // 获取留言信息
-    const [messages] = await pool.execute(
-      'SELECT user_id FROM messages WHERE id = ?',
+    // 获取最新的点赞数
+    const [likes] = await pool.execute(
+      'SELECT COUNT(*) as count FROM message_likes WHERE message_id = ?',
       [messageId]
     );
 
-    if (messages.length === 0) {
-      return res.status(404).json({
-        error: '留言不存在'
-      });
-    }
-
-    const messageUserId = messages[0].user_id;
-
-    // 检查是否是自己点赞自己的留言
-    if (messageUserId === userId) {
-      return res.status(400).json({
-        error: '不能给自己的留言点赞'
-      });
-    }
-
-    // 点赞留言
-    const [result] = await pool.execute(
-      `INSERT INTO message_likes (message_id, user_id)
-       VALUES (?, ?)
-       ON DUPLICATE KEY UPDATE created_at = CURRENT_TIMESTAMP`,
-      [messageId, userId]
-    );
-
     res.json({
-      message: '留言点赞成功'
+      code: 0,
+      data: {
+        liked: true,
+        likeCount: likes[0].count
+      },
+      msg: '留言点赞成功'
     });
 
   } catch (error) {
     console.error('留言点赞错误:', error);
     res.status(500).json({
-      error: '留言点赞失败'
+      code: 500,
+      data: null,
+      error: '留言点赞失败',
+      msg: error.message || '留言点赞失败'
     });
   }
 });
@@ -324,7 +350,10 @@ router.delete('/:messageId/like', authenticateToken, async (req, res) => {
 
     if (messages.length === 0) {
       return res.status(404).json({
-        error: '留言不存在'
+        code: 404,
+        data: null,
+        error: '留言不存在',
+        msg: '留言不存在'
       });
     }
 
@@ -335,19 +364,36 @@ router.delete('/:messageId/like', authenticateToken, async (req, res) => {
     );
 
     if (result.affectedRows > 0) {
+      // 获取最新的点赞数
+      const [likes] = await pool.execute(
+        'SELECT COUNT(*) as count FROM message_likes WHERE message_id = ?',
+        [messageId]
+      );
+
       res.json({
-        message: '取消点赞成功'
+        code: 0,
+        data: {
+          liked: false,
+          likeCount: likes[0].count
+        },
+        msg: '取消点赞成功'
       });
     } else {
       res.status(400).json({
-        error: '未对该留言进行点赞'
+        code: 400,
+        data: null,
+        error: '未对该留言进行点赞',
+        msg: '未对该留言进行点赞'
       });
     }
 
   } catch (error) {
     console.error('取消留言点赞错误:', error);
     res.status(500).json({
-      error: '取消留言点赞失败'
+      code: 500,
+      data: null,
+      error: '取消留言点赞失败',
+      msg: error.message || '取消留言点赞失败'
     });
   }
 });

@@ -5,6 +5,7 @@ import { getUserFiles } from '../services/fileService.js';
 import { getMySQLPool } from '../config/database.js';
 import { authenticateToken, optionalAuth } from '../middleware/auth.js';
 import { uploadSingle, uploadMultiple, processFileUpload, createUploadInstance } from '../utils/upload.js';
+import { recordVisit } from '../services/visitorService.js';
 
 const router = express.Router();
 
@@ -50,10 +51,28 @@ router.get('/:username', optionalAuth, async (req, res) => {
     // 获取当前登录用户ID（如果有）
     const currentUserId = req.user?.id || null;
     
+    // 记录访客访问（如果不是查看自己的档案）
+    if (currentUserId !== user.id) {
+      const ipAddress = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+      const userAgent = req.headers['user-agent'] || null;
+      await recordVisit(user.id, currentUserId, ipAddress, userAgent);
+    }
+    
     // 获取用户统计信息
     // 如果查看自己的档案，统计所有文件（包括非公开的）
     // 否则只统计公开文件
     const stats = await getUserStats(user.id, currentUserId);
+
+    // 检查当前用户是否关注了该用户
+    let isFollowing = false;
+    if (currentUserId && currentUserId !== user.id) {
+      const pool = getMySQLPool();
+      const [follows] = await pool.execute(
+        'SELECT 1 FROM follows WHERE follower_id = ? AND following_id = ?',
+        [currentUserId, user.id]
+      );
+      isFollowing = follows.length > 0;
+    }
 
     res.json({
       code: 0,
@@ -64,11 +83,13 @@ router.get('/:username', optionalAuth, async (req, res) => {
           avatar: user.avatar,
           bio: user.bio,
           location: user.location,
-          website: user.website,
+          position: user.position,
+          company: user.company,
           coverImage: user.cover_image || null,
           skills: user.skills,
           socialLinks: user.socialLinks,
-          isActive: true // 假设用户是活跃的，如果需要可以从users表的其他字段获取
+          isActive: true, // 假设用户是活跃的，如果需要可以从users表的其他字段获取
+          isFollowing: isFollowing // 添加关注状态
         },
         stats: stats
       },
@@ -103,20 +124,24 @@ router.put('/profile', authenticateToken, uploadFields(), [
       return value.length <= 100;
     })
     .withMessage('所在地不能超过100个字符'),
-  body('website')
+  body('position')
     .optional({ values: 'falsy' })
     .custom((value) => {
       // 允许空字符串
       if (value === '' || value === null || value === undefined) return true;
-      // 如果有值，验证是否为有效URL
-      try {
-        const url = new URL(value.startsWith('http') ? value : `http://${value}`);
-        return url.hostname.length > 0;
-      } catch {
-        return false;
-      }
+      // 如果有值，验证长度
+      return value.length <= 100;
     })
-    .withMessage('请提供有效的网站URL'),
+    .withMessage('职业不能超过100个字符'),
+  body('company')
+    .optional({ values: 'falsy' })
+    .custom((value) => {
+      // 允许空字符串
+      if (value === '' || value === null || value === undefined) return true;
+      // 如果有值，验证长度
+      return value.length <= 100;
+    })
+    .withMessage('公司名称不能超过100个字符'),
   body('skills')
     .optional({ values: 'falsy' })
     .custom((value) => {
@@ -248,8 +273,11 @@ router.put('/profile', authenticateToken, uploadFields(), [
     if (req.body.location !== undefined) {
       updates.location = req.body.location === '' ? null : req.body.location;
     }
-    if (req.body.website !== undefined) {
-      updates.website = req.body.website === '' ? null : req.body.website;
+    if (req.body.position !== undefined) {
+      updates.position = req.body.position === '' ? null : req.body.position;
+    }
+    if (req.body.company !== undefined) {
+      updates.company = req.body.company === '' ? null : req.body.company;
     }
     if (req.body.skills !== undefined) {
       // 处理skills（可能是JSON字符串或数组）

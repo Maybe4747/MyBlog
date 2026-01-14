@@ -22,6 +22,7 @@ import notificationRoutes from './routes/notifications.js';
 import activityRoutes from './routes/activity.js';
 import postRoutes from './routes/posts.js';
 import articleRoutes from './routes/articles.js';
+import visitorRoutes from './routes/visitors.js';
 
 // 创建Express应用
 const app = express();
@@ -112,6 +113,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/activity', activityRoutes);
 app.use('/api/posts', postRoutes);
 app.use('/api/articles', articleRoutes);
+app.use('/api/visitors', visitorRoutes);
 
 // 健康检查接口
 app.get('/health', (req, res) => {

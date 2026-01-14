@@ -1,13 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Link, useNavigate, useLocation, useNavigationType } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { getUserFiles, getUserProfile, getUserActivity, getPublicFiles } from '../../api/users';
-import { addFile, getMyProfile, updateFile, deleteFile } from '../../api/profiles';
-import { createPost, getPosts, Post as ApiPost, updatePost, deletePost } from '../../api/posts';
+import { addFile, getMyProfile, updateFile, deleteFile, likeFile, unlikeFile, commentOnFile, getFileComments, deleteFileComment } from '../../api/profiles';
+import { createPost, getPosts, Post as ApiPost, updatePost, deletePost, togglePostLike, addPostComment, getPostComments, deletePostComment, Comment as PostComment } from '../../api/posts';
 import { createArticle, getArticles, Article as ApiArticle, updateArticle, deleteArticle, getArticleById } from '../../api/articles';
 import Navbar from '../../components/Navbar';
 import { searchUsers } from '../../api/search';
+import { followUser, unfollowUser, getFollowers, getFollowing } from '../../api/social';
+import { getNotifications } from '../../api/notifications';
 import { User } from '../../types';
+import { getDefaultAvatar } from '../../utils/commonUtils';
+import CommentSection from '../../components/CommentSection';
+import { shareContent, generateShareUrl } from '../../utils/shareUtils';
+import RecentActivity from './recentActivity';
 import {
   HeartIcon,
   MessageCircleIcon,
@@ -24,10 +30,16 @@ import {
   EditIcon,
   TrashIcon,
   VideoIcon,
-  UploadIcon
+  UploadIcon,
+  UserPlusIcon,
+  MailIcon,
+  BellIcon
 } from 'lucide-react';
 import PostCreationModal from '../../components/PostCreationModal';
 import ArticleCreationModal from '../../components/ArticleCreationModal';
+import PostCard, { PostCardPost } from '../../components/PostCard';
+import PostFeed from '../../components/PostFeed';
+import { saveHomeDataCache, getHomeDataCache, clearHomeDataCache, updateCachedPost, removeCachedPost } from '../../utils/homeDataCache';
 
 interface Post {
   id: string | number; // 支持字符串（带前缀）和数字
@@ -61,17 +73,22 @@ interface Post {
 
 interface Connection {
   id: number;
+  userId?: number; // 用户ID，用于关注功能
   name: string;
   title: string;
   company: string;
   avatar: string;
   mutual: number;
+  isFollowing?: boolean; // 是否已关注
 }
 
 const Home = () => {
   const { user, loading: authLoading } = useAuth();
+  const navigationType = useNavigationType();
   const [posts, setPosts] = useState<Post[]>([]);
   const [connections, setConnections] = useState<Connection[]>([]);
+  const [followers, setFollowers] = useState<any[]>([]); // 粉丝列表
+  const [following, setFollowing] = useState<any[]>([]); // 关注列表
   const [activeTab, setActiveTab] = useState<'feed' | 'network'>('feed');
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -81,6 +98,13 @@ const Home = () => {
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [deletingPostId, setDeletingPostId] = useState<string | number | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | number | null>(null); // 当前打开的下拉菜单ID
+  const [expandedComments, setExpandedComments] = useState<Set<string | number>>(new Set()); // 展开评论的帖子ID
+  const [postComments, setPostComments] = useState<Record<string | number, PostComment[]>>({}); // 帖子评论
+  const [loadingComments, setLoadingComments] = useState<Record<string | number, boolean>>({}); // 加载评论状态
+  const [followingUsers, setFollowingUsers] = useState<Set<number>>(new Set()); // 已关注的用户ID集合
+  const [followingLoading, setFollowingLoading] = useState<Record<number, boolean>>({}); // 关注操作加载状态
+  const [recentActivities, setRecentActivities] = useState<any[]>([]); // 近期活动列表
+  const [contentFilter, setContentFilter] = useState<'all' | 'my' | 'following' | 'posts' | 'articles' | 'files'>('all'); // 内容筛选
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -90,31 +114,145 @@ const Home = () => {
   // 发布成功提示状态
   const [showSuccessMessage, setShowSuccessMessage] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+
+  // 统计详情模态框相关状态
+  const [statsModalOpen, setStatsModalOpen] = useState<boolean>(false);
+  const [statsModalType, setStatsModalType] = useState<'files' | 'followers' | 'following'>('files');
+  const [statsModalData, setStatsModalData] = useState<any[]>([]);
+  const [statsModalLoading, setStatsModalLoading] = useState<boolean>(false);
+
+  // 打开统计详情模态框
+  const openStatsModal = async (type: 'files' | 'followers' | 'following') => {
+    if (!user?.id) return;
+    
+    setStatsModalType(type);
+    setStatsModalOpen(true);
+    setStatsModalLoading(true);
+    setStatsModalData([]);
+
+    try {
+      if (type === 'followers') {
+        const response: any = await getFollowers(user.id);
+        console.log('主页获取关注者列表响应:', response);
+        // 后端可能直接返回 { followers, pagination } 或包装在 { code: 0, data: { followers, pagination } }
+        const followers = response?.followers || response?.data?.followers || (response?.code === 0 ? response?.data?.followers : null);
+        if (followers && Array.isArray(followers)) {
+          console.log('主页关注者列表数据:', followers);
+          setStatsModalData(followers);
+        } else {
+          console.warn('主页关注者列表数据格式异常:', response);
+        }
+      } else if (type === 'following') {
+        const response: any = await getFollowing(user.id);
+        console.log('主页获取关注列表响应:', response);
+        // 后端可能直接返回 { followings, pagination } 或包装在 { code: 0, data: { followings, pagination } }
+        const followings = response?.followings || response?.data?.followings || (response?.code === 0 ? response?.data?.followings : null);
+        if (followings && Array.isArray(followings)) {
+          console.log('主页关注列表数据:', followings);
+          setStatsModalData(followings);
+        } else {
+          console.warn('主页关注列表数据格式异常:', response);
+        }
+      } else if (type === 'files') {
+        const response: any = await getPublicFiles({ limit: 100 });
+        if (response?.code === 0 && response?.data?.files) {
+          const files = response.data.files.filter((file: any) => file.user_id === user.id);
+          setStatsModalData(files);
+        }
+      }
+    } catch (err: any) {
+      console.error('获取统计数据失败:', err);
+    } finally {
+      setStatsModalLoading(false);
+    }
+  };
+
+  // 关闭统计详情模态框
+  const closeStatsModal = () => {
+    setStatsModalOpen(false);
+    setStatsModalData([]);
+  };
   
   // 用户统计数据
   const [userStats, setUserStats] = useState({
     followers: 0,
     following: 0,
     files: 0,
-    downloads: 0,
+    visitors: 0,
     newFollowers: 0
   });
+
+  // 用户档案信息（从API获取的完整信息）
+  const [userProfile, setUserProfile] = useState<Partial<User>>({});
 
   useEffect(() => {
     if (user) {
       const shouldRefresh = location.state?.refresh;
+      const isBackNavigation = navigationType === 'POP';
+      
+      // 如果是返回操作且缓存有效，使用缓存数据
+      if (isBackNavigation && !shouldRefresh) {
+        const cachedData = getHomeDataCache();
+        if (cachedData) {
+          console.log('使用缓存的首页数据');
+          setPosts(cachedData.posts || []);
+          setConnections(cachedData.connections || []);
+          setFollowers(cachedData.followers || []);
+          setFollowing(cachedData.following || []);
+          setUserProfile(cachedData.profileData || {});
+          setUserStats(cachedData.userStats || {
+            followers: 0,
+            following: 0,
+            files: 0,
+            visitors: 0,
+            newFollowers: 0
+          });
+          setRecentActivities(cachedData.recentActivities || []);
+          if (cachedData.contentFilter) {
+            setContentFilter(cachedData.contentFilter as any);
+          }
+          setLoading(false);
+          
+          // 清除 location state，避免重复刷新
+          if (shouldRefresh) {
+            window.history.replaceState({}, '');
+          }
+          
+          // 记录访客访问（延迟执行，避免影响页面加载）
+          import('../../api/visitors').then(({ recordVisit }) => {
+            setTimeout(() => {
+              recordVisit(user.id).catch((err: any) => {
+                console.error('记录访客访问失败:', err);
+              });
+            }, 1000);
+          });
+          
+          return;
+        }
+      }
+      
+      // 否则正常获取数据
       fetchHomeData(shouldRefresh);
       // 清除 location state，避免重复刷新
       if (shouldRefresh) {
         window.history.replaceState({}, '');
       }
+      
+      // 记录访客访问（延迟执行，避免影响页面加载）
+      import('../../api/visitors').then(({ recordVisit }) => {
+        setTimeout(() => {
+          recordVisit(user.id).catch((err: any) => {
+            console.error('记录访客访问失败:', err);
+          });
+        }, 1000);
+      });
     }
 
     // 清理函数，当组件卸载时重置标志
     return () => {
       // 不在这里重置，允许组件重新挂载时获取数据
     };
-  }, [user, location.state]);
+  }, [user, location.state, navigationType]);
 
   // 创建一个可重用的 fetchHomeData 函数
   const fetchHomeData = async (forceRefresh = false) => {
@@ -131,19 +269,36 @@ const Home = () => {
       setLoading(true);
 
       // 获取用户自己的档案信息
-      let userProfile: Partial<User> = {};
       const stats = {
         followers: 0,
         following: 0,
         files: 0,
-        downloads: 0,
+        visitors: 0,
         newFollowers: 0
       };
       
       try {
-        const profileResponse = await getMyProfile();
-        const profileData = profileResponse.data?.profile || profileResponse.data?.user || {};
-        userProfile = profileData;
+        const profileResponse: any = await getMyProfile();
+        console.log('获取用户档案完整响应:', JSON.stringify(profileResponse, null, 2));
+        // API拦截器返回的是 { code: 0, data: { profile: {...} }, msg: '...' }
+        // 所以 profileResponse 就是整个响应对象
+        const profileData = profileResponse?.data?.profile || profileResponse?.data?.user || profileResponse?.data?.data || {};
+        console.log('解析后的profileData:', profileData);
+        console.log('todayNewFollowers值:', profileData.todayNewFollowers);
+        console.log('todayVisitors值:', profileData.todayVisitors);
+        // 合并用户基础信息和档案信息
+        const mergedProfile: Partial<User> = {
+          ...user,
+          ...profileData,
+          position: profileData.position || profileData.title,
+          company: profileData.company,
+          location: profileData.location,
+          bio: profileData.bio,
+          skills: profileData.skills || []
+        };
+        
+        // 保存用户档案信息到状态
+        setUserProfile(mergedProfile);
         
         // 从API响应中提取统计数据
         if (profileData.followerCount !== undefined) {
@@ -155,33 +310,31 @@ const Home = () => {
         if (profileData.totalFiles !== undefined) {
           stats.files = profileData.totalFiles;
         }
-        if (profileData.totalDownloads !== undefined) {
-          stats.downloads = profileData.totalDownloads;
+        if (profileData.todayVisitors !== undefined) {
+          stats.visitors = profileData.todayVisitors;
         }
+        if (profileData.todayNewFollowers !== undefined) {
+          stats.newFollowers = profileData.todayNewFollowers;
+        } else {
+          console.warn('todayNewFollowers未定义，使用默认值0');
+        }
+        
+        console.log('最终stats:', stats);
         
         // 更新统计数据状态
         setUserStats(stats);
       } catch (profileError: any) {
         console.error('获取用户档案失败:', profileError);
-        userProfile = {
-          username: user?.username,
-          avatar: user?.avatar,
+        // 如果获取失败，使用 AuthContext 中的用户信息
+        const fallbackProfile: Partial<User> = {
+          ...user,
           position: user?.position,
-          title: user?.title,
           location: user?.location,
-          skills: user?.skills,
-          stats: user?.stats || {}
+          company: user?.company,
+          bio: user?.bio,
+          skills: user?.skills || []
         };
-      }
-
-      // 获取推荐用户
-      let recommendedUsers: any[] = [];
-      try {
-        const searchResponse = await searchUsers('default', { limit: 3 });
-        recommendedUsers = searchResponse.data?.data?.users || searchResponse.data?.users || [];
-      } catch (searchError: any) {
-        console.error('获取推荐用户失败:', searchError);
-        recommendedUsers = [];
+        setUserProfile(fallbackProfile);
       }
 
       // 获取所有内容：posts、articles和files
@@ -189,16 +342,17 @@ const Home = () => {
 
       // 1. 获取帖子（posts）
       try {
-        const postsResponse: any = await getPosts({ limit: 20, visibility: 'public' });
+        // 传 visibility: 'followers'，后端会返回公开的 + 关注者可见的（如果已关注）+ 自己的
+        const postsResponse: any = await getPosts({ limit: 20, visibility: 'followers' });
         if (postsResponse?.code === 0 && postsResponse?.data?.posts) {
           const posts = postsResponse.data.posts.map((post: ApiPost) => ({
             id: `post-${post.id}`, // 添加前缀确保唯一性
             originalId: post.id, // 存储原始ID用于API调用
             authorId: post.user_id, // 存储作者ID
             author: {
-              name: post.username || '用户',
-              title: userProfile?.position || userProfile?.title || '用户',
-              company: userProfile?.company || '',
+              name: post.username || '',
+              title: '', // 帖子作者信息从API获取，这里不设置
+              company: '',
               avatar: post.avatar || ''
             },
             content: post.content || '',
@@ -220,16 +374,17 @@ const Home = () => {
 
       // 2. 获取文章（articles）
       try {
-        const articlesResponse: any = await getArticles({ limit: 20, visibility: 'public' });
+        // 传 visibility: 'followers'，后端会返回公开的 + 关注者可见的（如果已关注）+ 自己的
+        const articlesResponse: any = await getArticles({ limit: 20, visibility: 'followers' });
         if (articlesResponse?.code === 0 && articlesResponse?.data?.articles) {
           const articles = articlesResponse.data.articles.map((article: ApiArticle) => ({
             id: `article-${article.id}`, // 添加前缀确保唯一性
             originalId: article.id, // 存储原始ID用于API调用
             authorId: article.user_id, // 存储作者ID
             author: {
-              name: article.username || '用户',
-              title: userProfile?.position || userProfile?.title || '用户',
-              company: userProfile?.company || '',
+              name: article.username || '',
+              title: '', // 文章作者信息从API获取，这里不设置
+              company: '',
               avatar: article.avatar || ''
             },
             content: article.summary || article.content.substring(0, 200) || '',
@@ -296,9 +451,9 @@ const Home = () => {
             originalId: activity.id, // 存储原始ID用于API调用
             authorId: activity.userId || activity.user_id, // 存储作者ID
             author: {
-              name: activity.username || activity.owner_username || user?.username || '用户',
-              title: userProfile?.position || userProfile?.title || '用户',
-              company: userProfile?.company || '',
+              name: activity.username || activity.owner_username || user?.username || '',
+              title: '', // 文件作者信息从API获取，这里不设置
+              company: '',
               avatar: activity.avatar || user?.avatar || ''
             },
             content: activity.description || activity.title || '分享了一个文件',
@@ -320,25 +475,102 @@ const Home = () => {
 
       allPosts.push(...filePosts);
 
+      // 去重：根据 id 去重，保留第一个出现的
+      const uniquePostsMap = new Map<string | number, Post>();
+      for (const post of allPosts) {
+        if (!uniquePostsMap.has(post.id)) {
+          uniquePostsMap.set(post.id, post);
+        }
+      }
+      const uniquePosts = Array.from(uniquePostsMap.values());
+
       // 按时间排序（最新的在前）
-      const formattedPosts = allPosts.sort((a, b) => {
+      const formattedPosts = uniquePosts.sort((a, b) => {
         const timeA = new Date(a.timestamp).getTime();
         const timeB = new Date(b.timestamp).getTime();
         return timeB - timeA;
       });
 
-      // 将推荐用户转换为连接格式
-      const formattedConnections: Connection[] = recommendedUsers.map(recUser => ({
-        id: recUser.id,
-        name: recUser.username,
-        title: recUser.position || '用户',
-        company: recUser.company || '',
-        avatar: recUser.avatar || '',
-        mutual: recUser.mutualConnections || 0
-      }));
+      // 获取粉丝列表和关注列表
+      let followersList: any[] = [];
+      let followingList: any[] = [];
+      
+      if (user?.id) {
+        try {
+          // 获取粉丝列表
+          const followersResponse: any = await getFollowers(user.id);
+          const followersData = followersResponse?.followers || followersResponse?.data?.followers || (followersResponse?.code === 0 ? followersResponse?.data?.followers : null);
+          if (followersData && Array.isArray(followersData)) {
+            followersList = followersData;
+          }
+        } catch (err) {
+          console.error('获取粉丝列表失败:', err);
+        }
+
+        try {
+          // 获取关注列表
+          const followingResponse: any = await getFollowing(user.id);
+          const followingData = followingResponse?.followings || followingResponse?.data?.followings || (followingResponse?.code === 0 ? followingResponse?.data?.followings : null);
+          if (followingData && Array.isArray(followingData)) {
+            followingList = followingData;
+          }
+        } catch (err) {
+          console.error('获取关注列表失败:', err);
+        }
+      }
+
+      // 将关注列表转换为连接格式（职场人脉只显示关注的人）
+      const formattedConnections: Connection[] = followingList.map((followUser: any) => ({
+        id: followUser.id,
+        userId: followUser.id,
+        name: followUser.username,
+        title: followUser.position || '未设置职位',
+        company: followUser.company || '未设置公司',
+        avatar: followUser.avatar || '',
+        mutual: 0,
+        isFollowing: true // 关注列表中的人都是已关注的
+        }));
+
+      // 初始化 followingUsers Set，将已关注的用户ID添加到 Set 中
+      const initialFollowingUsers = new Set<number>();
+      followingList.forEach((followUser: any) => {
+        if (followUser.id) {
+          initialFollowingUsers.add(followUser.id);
+        }
+      });
 
       setPosts(formattedPosts);
       setConnections(formattedConnections);
+      setFollowers(followersList);
+      setFollowing(followingList);
+      setFollowingUsers(initialFollowingUsers); // 初始化关注状态
+
+      // 获取近期活动（通知）
+      let recentActivitiesList: any[] = [];
+      try {
+        const notificationsResponse: any = await getNotifications({ page: 1, limit: 5 });
+        if (notificationsResponse?.code === 0 && notificationsResponse?.data?.notifications) {
+          recentActivitiesList = notificationsResponse.data.notifications;
+          setRecentActivities(recentActivitiesList);
+        }
+      } catch (notificationsError: any) {
+        console.error('获取近期活动失败:', notificationsError);
+        setRecentActivities([]);
+      }
+
+      // 保存数据到缓存
+      saveHomeDataCache({
+        posts: formattedPosts,
+        articles: formattedPosts.filter(p => p.contentType === 'article'),
+        files: formattedPosts.filter(p => p.contentType === 'file'),
+        connections: formattedConnections,
+        followers: followersList,
+        following: followingList,
+        profileData: userProfile,
+        userStats: stats,
+        recentActivities: recentActivitiesList,
+        contentFilter: contentFilter
+      });
     } catch (err: any) {
       setError(err.message || '获取数据失败');
       console.error('获取首页数据失败:', err);
@@ -352,19 +584,352 @@ const Home = () => {
   const [imageModalOpen, setImageModalOpen] = useState(false);
   const [modalImageUrl, setModalImageUrl] = useState('');
   const [modalImageTitle, setModalImageTitle] = useState('');
+  const [modalMediaType, setModalMediaType] = useState<'image' | 'video'>('image');
 
   const handleLike = async (postId: string | number) => {
+    if (!user) {
+      navigate('/login');
+      return;
+    }
+
     try {
-      // 这里应该调用实际的API来点赞/取消点赞
-      // 由于没有具体的点赞文件API，我们暂时只更新本地状态
-      setPosts(posts.map(post =>
-        post.id === postId
-          ? { ...post, liked: !post.liked, likes: post.liked ? post.likes - 1 : post.likes + 1 }
-          : post
-      ));
+      const post = posts.find(p => p.id === postId);
+      if (!post || !post.originalId) return;
+
+      // 根据内容类型调用不同的API
+      // 帖子类型：image 或 video
+      if (post.contentType === 'image' || post.contentType === 'video') {
+        const result: any = await togglePostLike(post.originalId);
+        // API 拦截器返回的是 { code, data, msg }，所以 result 就是响应数据
+        console.log('点赞结果:', result);
+        console.log('result.code:', result?.code);
+        console.log('result.data:', result?.data);
+        
+        // result 的格式是 {code: 0, data: {liked: true, likeCount: 1}, msg: '点赞成功'}
+        if (result && result.code === 0 && result.data) {
+          const newLiked = result.data.liked;
+          const newLikeCount = result.data.likeCount ?? post.likes;
+          console.log('更新状态:', { newLiked, newLikeCount, currentLiked: post.liked, postId });
+          
+          // 使用函数式更新确保使用最新状态
+          setPosts(prevPosts => prevPosts.map(p => {
+            if (p.id === postId) {
+              console.log('更新帖子:', p.id, '从', p.liked, '到', newLiked);
+              return { 
+                ...p, 
+                liked: newLiked, 
+                likes: newLikeCount
+              };
+            }
+            return p;
+          }));
+        } else {
+          console.error('点赞失败或响应格式错误:', result);
+          console.error('条件检查:', { 
+            hasResult: !!result, 
+            code: result?.code, 
+            hasData: !!result?.data 
+          });
+        }
+      } else if (post.contentType === 'article') {
+        const { toggleArticleLike } = await import('../../api/articles');
+        const result: any = await toggleArticleLike(post.originalId);
+        // API 拦截器返回的是 { code, data, msg }，所以 result 就是响应数据
+        console.log('点赞结果:', result);
+        console.log('result.code:', result?.code);
+        console.log('result.data:', result?.data);
+        
+        // result 的格式是 {code: 0, data: {liked: true, likeCount: 1}, msg: '点赞成功'}
+        if (result && result.code === 0 && result.data) {
+          const newLiked = result.data.liked;
+          const newLikeCount = result.data.likeCount ?? post.likes;
+          console.log('更新状态:', { newLiked, newLikeCount, currentLiked: post.liked, postId });
+          
+          // 使用函数式更新确保使用最新状态
+          setPosts(prevPosts => prevPosts.map(p => {
+            if (p.id === postId) {
+              console.log('更新文章:', p.id, '从', p.liked, '到', newLiked);
+              return { 
+                ...p, 
+                liked: newLiked, 
+                likes: newLikeCount
+              };
+            }
+            return p;
+          }));
+        } else {
+          console.error('点赞失败或响应格式错误:', result);
+          console.error('条件检查:', { 
+            hasResult: !!result, 
+            code: result?.code, 
+            hasData: !!result?.data 
+          });
+        }
+      } else if (post.contentType === 'file') {
+        // 文件点赞：需要先检查是否已点赞，然后调用对应的API
+        const isCurrentlyLiked = post.liked;
+        let result: any;
+        
+        if (isCurrentlyLiked) {
+          // 取消点赞
+          result = await unlikeFile(post.originalId);
+        } else {
+          // 添加点赞
+          result = await likeFile(post.originalId);
+        }
+        
+        console.log('文件点赞结果:', result);
+        
+        // 文件点赞API返回格式：{code: 0, data: {liked: true/false, likeCount: number}, msg: '...'}
+        if (result && result.code === 0 && result.data) {
+          const newLiked = result.data.liked;
+          const newLikeCount = result.data.likeCount ?? post.likes;
+          
+          console.log('更新文件状态:', { newLiked, newLikeCount, currentLiked: post.liked, postId });
+          
+          // 使用函数式更新确保使用最新状态
+          setPosts(prevPosts => prevPosts.map(p => {
+            if (p.id === postId) {
+              console.log('更新文件:', p.id, '从', p.liked, '到', newLiked);
+              return { 
+                ...p, 
+                liked: newLiked, 
+                likes: newLikeCount
+              };
+            }
+            return p;
+          }));
+        } else {
+          console.error('文件点赞失败或响应格式错误:', result);
+        }
+      }
     } catch (err: any) {
       setError(err.message || '操作失败');
       console.error('点赞操作失败:', err);
+    }
+  };
+
+  const handleToggleComments = async (postId: string | number) => {
+    if (!user) {
+      navigate('/login');
+      return;
+    }
+
+    const post = posts.find(p => p.id === postId);
+    if (!post || !post.originalId) return;
+
+    const isExpanded = expandedComments.has(postId);
+    
+    if (isExpanded) {
+      // 收起评论
+      setExpandedComments(prev => {
+        const next = new Set(prev);
+        next.delete(postId);
+        return next;
+      });
+    } else {
+      // 展开评论
+      setExpandedComments(prev => new Set(prev).add(postId));
+      
+      // 如果还没有加载过评论，则加载
+      if (!postComments[postId]) {
+        setLoadingComments(prev => ({ ...prev, [postId]: true }));
+        try {
+          if (post.contentType === 'image' || post.contentType === 'video') {
+            const result: any = await getPostComments(post.originalId);
+            console.log('获取帖子评论结果:', result);
+            // API拦截器返回的是 {code, data, msg}，所以result就是响应数据
+            if (result && result.code === 0 && result.data) {
+              setPostComments(prev => ({ ...prev, [postId]: result.data.comments || [] }));
+            } else {
+              console.error('获取评论失败:', result);
+            }
+          } else if (post.contentType === 'article') {
+            const { getArticleComments } = await import('../../api/articles');
+            const result: any = await getArticleComments(post.originalId);
+            console.log('获取文章评论结果:', result);
+            // API拦截器返回的是 {code, data, msg}，所以result就是响应数据
+            if (result && result.code === 0 && result.data) {
+              setPostComments(prev => ({ ...prev, [postId]: result.data.comments || [] }));
+            } else {
+              console.error('获取评论失败:', result);
+            }
+          } else if (post.contentType === 'file') {
+            const result: any = await getFileComments(post.originalId);
+            console.log('获取文件评论结果:', result);
+            // API拦截器返回的是 {code, data, msg}，所以result就是响应数据
+            if (result && result.code === 0 && result.data) {
+              setPostComments(prev => ({ ...prev, [postId]: result.data.comments || [] }));
+            } else {
+              console.error('获取评论失败:', result);
+            }
+          }
+        } catch (err) {
+          console.error('加载评论失败:', err);
+        } finally {
+          setLoadingComments(prev => ({ ...prev, [postId]: false }));
+        }
+      }
+    }
+  };
+
+  const handleAddComment = async (postId: string | number, content: string) => {
+    const post = posts.find(p => p.id === postId);
+    if (!post || !post.originalId) return;
+
+    try {
+      if (post.contentType === 'image' || post.contentType === 'video') {
+        const result: any = await addPostComment(post.originalId, content);
+        console.log('添加帖子评论结果:', result);
+        // API拦截器返回的是 {code, data, msg}，所以result就是响应数据
+        if (result && result.code === 0 && result.data && result.data.comment) {
+          setPostComments(prev => ({
+            ...prev,
+            [postId]: [...(prev[postId] || []), result.data.comment]
+          }));
+          // 更新评论数
+          setPosts(prevPosts => prevPosts.map(p =>
+            p.id === postId ? { ...p, comments: p.comments + 1 } : p
+          ));
+        } else {
+          console.error('添加评论失败:', result);
+        }
+      } else if (post.contentType === 'article') {
+        const { addArticleComment } = await import('../../api/articles');
+        const result: any = await addArticleComment(post.originalId, content);
+        console.log('添加文章评论结果:', result);
+        // API拦截器返回的是 {code, data, msg}，所以result就是响应数据
+        if (result && result.code === 0 && result.data && result.data.comment) {
+          setPostComments(prev => ({
+            ...prev,
+            [postId]: [...(prev[postId] || []), result.data.comment]
+          }));
+          // 更新评论数
+          setPosts(prevPosts => prevPosts.map(p =>
+            p.id === postId ? { ...p, comments: p.comments + 1 } : p
+          ));
+        } else {
+          console.error('添加评论失败:', result);
+        }
+      } else if (post.contentType === 'file') {
+        const result: any = await commentOnFile(post.originalId, content);
+        console.log('添加文件评论结果:', result);
+        // API拦截器返回的是 {code, data, msg}，所以result就是响应数据
+        if (result && result.code === 0 && result.data && result.data.comment) {
+          setPostComments(prev => ({
+            ...prev,
+            [postId]: [...(prev[postId] || []), result.data.comment]
+          }));
+          // 更新评论数
+          setPosts(prevPosts => prevPosts.map(p =>
+            p.id === postId ? { ...p, comments: p.comments + 1 } : p
+          ));
+        } else {
+          console.error('添加评论失败:', result);
+        }
+      }
+    } catch (err) {
+      console.error('添加评论失败:', err);
+      throw err;
+    }
+  };
+
+  const handleDeleteComment = async (postId: string | number, commentId: number) => {
+    const post = posts.find(p => p.id === postId);
+    if (!post || !post.originalId) return;
+
+    try {
+      if (post.contentType === 'image' || post.contentType === 'video') {
+        const result: any = await deletePostComment(post.originalId, commentId);
+        console.log('删除帖子评论结果:', result);
+        // API拦截器返回的是 {code, data, msg}，所以result就是响应数据
+        if (result && result.code === 0) {
+          setPostComments(prev => ({
+            ...prev,
+            [postId]: (prev[postId] || []).filter(c => c.id !== commentId)
+          }));
+          // 更新评论数
+          setPosts(prevPosts => prevPosts.map(p =>
+            p.id === postId ? { ...p, comments: Math.max(0, p.comments - 1) } : p
+          ));
+        } else {
+          console.error('删除评论失败:', result);
+        }
+      } else if (post.contentType === 'article') {
+        const { deleteArticleComment } = await import('../../api/articles');
+        const result: any = await deleteArticleComment(post.originalId, commentId);
+        console.log('删除文章评论结果:', result);
+        // API拦截器返回的是 {code, data, msg}，所以result就是响应数据
+        if (result && result.code === 0) {
+          setPostComments(prev => ({
+            ...prev,
+            [postId]: (prev[postId] || []).filter(c => c.id !== commentId)
+          }));
+          // 更新评论数
+          setPosts(prevPosts => prevPosts.map(p =>
+            p.id === postId ? { ...p, comments: Math.max(0, p.comments - 1) } : p
+          ));
+        } else {
+          console.error('删除评论失败:', result);
+        }
+      } else if (post.contentType === 'file') {
+        const result: any = await deleteFileComment(post.originalId, commentId);
+        console.log('删除文件评论结果:', result);
+        // API拦截器返回的是 {code, data, msg}，所以result就是响应数据
+        if (result && result.code === 0) {
+          setPostComments(prev => ({
+            ...prev,
+            [postId]: (prev[postId] || []).filter(c => c.id !== commentId)
+          }));
+          // 更新评论数
+          setPosts(prevPosts => prevPosts.map(p =>
+            p.id === postId ? { ...p, comments: Math.max(0, p.comments - 1) } : p
+          ));
+        } else {
+          console.error('删除评论失败:', result);
+        }
+      }
+    } catch (err) {
+      console.error('删除评论失败:', err);
+      throw err;
+    }
+  };
+
+  const handleShare = async (post: Post) => {
+    if (!post.originalId) return;
+
+    let shareUrl = '';
+    let shareTitle = '';
+    let shareText = '';
+
+    if (post.contentType === 'image' || post.contentType === 'video') {
+      shareUrl = generateShareUrl('post', post.originalId);
+      shareTitle = '分享一个帖子';
+      shareText = post.content || post.description || '';
+    } else if (post.contentType === 'article') {
+      shareUrl = generateShareUrl('article', post.originalId);
+      shareTitle = post.title || '分享一篇文章';
+      shareText = post.description || '';
+    } else if (post.contentType === 'file') {
+      shareUrl = generateShareUrl('file', post.originalId);
+      shareTitle = post.title || '分享一个文件';
+      shareText = post.description || '';
+    }
+
+    const result = await shareContent({
+      title: shareTitle,
+      text: shareText,
+      url: shareUrl
+    });
+
+    if (result.success) {
+      if (result.method === 'copy') {
+        setSuccessMessage('链接已复制到剪贴板！');
+        setShowSuccessMessage(true);
+        setTimeout(() => setShowSuccessMessage(false), 3000);
+      }
+    } else {
+      setError('分享失败，请手动复制链接');
     }
   };
 
@@ -479,9 +1044,10 @@ const Home = () => {
     }
   };
 
-  const openImageModal = (imageUrl: string, title: string) => {
+  const openImageModal = (imageUrl: string, title: string, mediaType: 'image' | 'video' = 'image') => {
     setModalImageUrl(imageUrl);
     setModalImageTitle(title);
+    setModalMediaType(mediaType);
     setImageModalOpen(true);
   };
 
@@ -515,27 +1081,40 @@ const Home = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* 图片模态框 */}
+      {/* 图片/视频预览模态框 */}
       {imageModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
           onClick={closeImageModal}
         >
-          <div className="relative max-w-4xl max-h-[90vh] p-4" onClick={(e) => e.stopPropagation()}>
+          <div className="relative max-w-5xl max-h-[90vh] p-4" onClick={(e) => e.stopPropagation()}>
             <button
               onClick={closeImageModal}
               className="absolute top-4 right-4 bg-black/50 text-white rounded-full p-2 hover:bg-black/70 transition-colors z-10"
             >
               <XIcon className="w-6 h-6" />
             </button>
-            <img
-              src={modalImageUrl}
-              alt={modalImageTitle}
-              className="max-w-full max-h-[80vh] object-contain rounded-lg"
-            />
-            <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 text-white text-center">
-              <p className="font-medium">{modalImageTitle}</p>
-            </div>
+            {modalMediaType === 'video' ? (
+              <video
+                src={modalImageUrl}
+                controls
+                autoPlay
+                className="max-w-full max-h-[80vh] object-contain rounded-lg"
+              >
+                您的浏览器不支持视频播放
+              </video>
+            ) : (
+              <img
+                src={modalImageUrl}
+                alt={modalImageTitle}
+                className="max-w-full max-h-[80vh] object-contain rounded-lg"
+              />
+            )}
+            {modalImageTitle && (
+              <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 text-white text-center bg-black/50 px-4 py-2 rounded-lg">
+                <p className="font-medium">{modalImageTitle}</p>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -547,35 +1126,54 @@ const Home = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Left sidebar - User profile and quick stats */}
-          <div className="lg:col-span-3 space-y-6">
+          <div className="lg:col-span-3 space-y-6 lg:sticky lg:top-16 lg:self-start">
             {/* User profile card */}
             <div className="bg-gradient-to-br from-white via-blue-50/40 to-purple-50/30 rounded-2xl shadow-lg border border-blue-100/60 p-6 backdrop-blur-sm hover:shadow-xl transition-all duration-300">
               <div className="flex flex-col items-center">
                 <div className="relative mb-4">
-                  <div className="absolute inset-0 bg-gradient-to-br from-blue-200 to-purple-200 rounded-full blur-xl opacity-50"></div>
-                  <img
-                    className="h-20 w-20 rounded-full ring-4 ring-white/80 relative z-10"
-                    src={user?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?ixlib=rb-1.2.1&auto=format&fit=crop&w=200&q=80'}
-                    alt={user?.username}
-                  />
+                  <Link to={`/profile/${user?.username}`} className="block">
+                    <div className="absolute inset-0 bg-gradient-to-br from-blue-200 to-purple-200 rounded-full blur-xl opacity-50"></div>
+                    <img
+                      className="h-20 w-20 rounded-full ring-4 ring-white/80 relative z-10 cursor-pointer hover:ring-blue-300 transition-all"
+                      src={user?.avatar || getDefaultAvatar(user?.username)}
+                      alt={user?.username}
+                    />
+                  </Link>
                 </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-1">{user?.username || '用户'}</h3>
-                <p className="text-sm text-gray-600 font-medium">{user?.position || user?.title || '软件工程师'}</p>
-                <p className="text-xs text-gray-500 mt-1 flex items-center">
-                  <MapPinIcon className="w-3 h-3 mr-1" />
-                  {user?.location || '北京'}
-                </p>
+                <h3 className="text-lg font-bold text-gray-900 mb-1">{userProfile?.username || user?.username || '用户'}</h3>
+                {(userProfile?.position || userProfile?.company) && (
+                  <p className="text-sm text-gray-600 font-medium">
+                    {userProfile?.position || ''}
+                    {userProfile?.position && userProfile?.company && ' · '}
+                    {userProfile?.company || ''}
+                  </p>
+                )}
+                {userProfile?.location && (
+                  <p className="text-xs text-gray-500 mt-1 flex items-center">
+                    <MapPinIcon className="w-3 h-3 mr-1" />
+                    {userProfile.location}
+                  </p>
+                )}
 
                 <div className="flex space-x-6 mt-6 text-center w-full border-t border-blue-100/50 pt-4">
-                  <div className="flex-1">
+                  <div 
+                    className="flex-1 cursor-pointer hover:bg-blue-50/50 rounded-lg p-2 transition-colors"
+                    onClick={() => openStatsModal('followers')}
+                  >
                     <p className="text-lg font-bold text-blue-600">{userStats.followers}</p>
                     <p className="text-xs text-gray-500 mt-1">粉丝</p>
                   </div>
-                  <div className="flex-1">
+                  <div 
+                    className="flex-1 cursor-pointer hover:bg-purple-50/50 rounded-lg p-2 transition-colors"
+                    onClick={() => openStatsModal('following')}
+                  >
                     <p className="text-lg font-bold text-purple-600">{userStats.following}</p>
                     <p className="text-xs text-gray-500 mt-1">关注</p>
                   </div>
-                  <div className="flex-1">
+                  <div 
+                    className="flex-1 cursor-pointer hover:bg-pink-50/50 rounded-lg p-2 transition-colors"
+                    onClick={() => openStatsModal('files')}
+                  >
                     <p className="text-lg font-bold text-pink-600">{userStats.files}</p>
                     <p className="text-xs text-gray-500 mt-1">文件</p>
                   </div>
@@ -595,9 +1193,9 @@ const Home = () => {
                     <div className="p-2 bg-blue-100/50 rounded-lg mr-3">
                       <TrendingUpIcon className="h-4 w-4 text-blue-600" />
                     </div>
-                    <span className="text-sm font-medium text-gray-700">文件下载量</span>
+                    <span className="text-sm font-medium text-gray-700">访客总量</span>
                   </div>
-                  <span className="text-sm font-bold text-blue-600">{userStats.downloads}</span>
+                  <span className="text-sm font-bold text-blue-600">{userStats.visitors}</span>
                 </div>
                 <div className="flex items-center justify-between p-3 rounded-xl bg-white/60 backdrop-blur-sm hover:bg-white/80 transition-all">
                   <div className="flex items-center">
@@ -620,31 +1218,6 @@ const Home = () => {
               </div>
             </div>
 
-            {/* Suggestions */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">可能认识的人</h3>
-              <div className="space-y-4">
-                {/* {connections.map((connection) => (
-                  <div key={connection.id} className="flex items-center justify-between">
-                    <div className="flex items-center">
-                      <img
-                        className="h-10 w-10 rounded-full"
-                        src={connection.avatar || `https://ui-avatars.com/api/?name=${connection.name}&background=random`}
-                        alt={connection.name}
-                      />
-                      <div className="ml-3">
-                        <p className="text-sm font-medium text-gray-900">{connection.name}</p>
-                        <p className="text-xs text-gray-500">{connection.title}</p>
-                        <p className="text-xs text-gray-500">{connection.mutual || 0} 位共同联系人</p>
-                      </div>
-                    </div>
-                    <button className="text-xs bg-blue-50 text-blue-600 px-3 py-1 rounded-full hover:bg-blue-100 transition-colors">
-                      添加
-                    </button>
-                  </div>
-                ))} */}
-              </div>
-            </div>
           </div>
 
           {/* Main content based on active tab */}
@@ -694,7 +1267,7 @@ const Home = () => {
                       <div className="absolute inset-0 bg-gradient-to-br from-blue-200 to-purple-200 rounded-full blur-md opacity-40"></div>
                       <img
                         className="h-12 w-12 rounded-full ring-3 ring-white/80 relative z-10"
-                        src={user?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?ixlib=rb-1.2.1&auto=format&fit=crop&w=200&q=80'}
+                        src={user?.avatar || getDefaultAvatar(user?.username)}
                         alt={user?.username}
                       />
                     </div>
@@ -748,223 +1321,45 @@ const Home = () => {
                   </div>
                 </div>
 
-                {/* Posts feed */}
-                {posts.length > 0 ? (
-                  posts.map((post) => (
-                    <div key={post.id} className="bg-gradient-to-br from-white via-blue-50/30 to-purple-50/20 rounded-2xl shadow-lg border border-blue-100/60 overflow-hidden hover:shadow-xl transition-all duration-300 backdrop-blur-sm">
-                      {/* Post header */}
-                      <div className="p-6 pb-4 bg-gradient-to-r from-blue-50/30 to-purple-50/20 border-b border-blue-100/50">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center">
-                            <div className="relative">
-                              <div className="absolute inset-0 bg-gradient-to-br from-blue-200 to-purple-200 rounded-full blur-md opacity-30"></div>
-                              <img
-                                className="h-12 w-12 rounded-full ring-2 ring-white/80 relative z-10"
-                                src={post.author.avatar || `https://ui-avatars.com/api/?name=${post.author.name}&background=random`}
-                                alt={post.author.name}
-                              />
-                            </div>
-                            <div className="ml-4">
-                              <h4 className="text-sm font-bold text-gray-900">{post.author.name}</h4>
-                              <p className="text-sm text-gray-600 font-medium">{post.author.title} · {post.author.company}</p>
-                              <p className="text-xs text-gray-500 mt-0.5 flex items-center">
-                                <CalendarIcon className="w-3 h-3 mr-1" />
-                                {post.timestamp}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="relative dropdown-menu-container">
-                            <button
-                              onClick={() => setOpenMenuId(openMenuId === post.id ? null : post.id)}
-                              className="p-2 text-gray-400 hover:text-gray-700 hover:bg-white/60 rounded-xl transition-all"
-                            >
-                              <MoreHorizontalIcon className="h-5 w-5" />
-                            </button>
-                            
-                            {/* 下拉菜单 - 只对作者显示编辑和删除 */}
-                            {openMenuId === post.id && post.authorId === user?.id && (
-                              <div className="absolute right-0 top-full mt-2 w-40 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-50">
-                                <button
-                                  onClick={() => {
-                                    handleEdit(post);
-                                    setOpenMenuId(null);
-                                  }}
-                                  className="w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-50 flex items-center space-x-2 transition-colors"
-                                >
-                                  <EditIcon className="w-4 h-4 text-blue-500" />
-                                  <span>编辑</span>
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setDeletingPostId(post.id);
-                                    setOpenMenuId(null);
-                                  }}
-                                  className="w-full px-4 py-2 text-left text-red-600 hover:bg-red-50 flex items-center space-x-2 transition-colors"
-                                >
-                                  <TrashIcon className="w-4 h-4" />
-                                  <span>删除</span>
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Post content */}
-                      <div className="px-6 py-5">
-                        <p className="text-gray-800 leading-relaxed font-medium">{post.content}</p>
-
-                        {/* 根据内容类型显示不同的媒体内容 */}
-                        {post.contentType === 'image' && post.mediaUrl && (
-                          <div className="mt-5">
-                            <div
-                              className="rounded-2xl overflow-hidden cursor-pointer hover:scale-[1.02] transition-transform duration-300 shadow-lg hover:shadow-xl"
-                              onClick={() => openImageModal(post.mediaUrl || '', post.title || '分享的图片')}
-                            >
-                              <img
-                                src={post.mediaUrl}
-                                alt={post.title || '分享的图片'}
-                                className="w-full h-80 object-cover"
-                              />
-                            </div>
-                          </div>
-                        )}
-
-                        {post.contentType === 'video' && post.mediaUrl && (
-                          <div className="mt-5">
-                            <div className="rounded-2xl overflow-hidden shadow-lg hover:shadow-xl">
-                              <video
-                                src={post.mediaUrl}
-                                controls
-                                className="w-full h-80 object-cover"
-                              />
-                            </div>
-                          </div>
-                        )}
-
-                        {post.contentType === 'article' && (
-                          <div
-                            className="mt-5 p-5 bg-gradient-to-br from-green-50/50 to-emerald-50/30 rounded-2xl border border-green-100/60 cursor-pointer hover:shadow-xl hover:scale-[1.01] transition-all duration-300 backdrop-blur-sm"
-                            onClick={() => {
-                              // 提取原始ID（如果是字符串格式如 "article-1"，提取数字部分）
-                              let articleId = post.originalId;
-                              if (!articleId && typeof post.id === 'string' && post.id.startsWith('article-')) {
-                                articleId = parseInt(post.id.replace('article-', ''));
-                              } else if (!articleId) {
-                                articleId = typeof post.id === 'number' ? post.id : parseInt(String(post.id));
-                              }
-                              navigate(`/articles/${articleId}`);
-                            }}
-                          >
-                            <div className="flex items-center">
-                              <div className="p-3 bg-green-100/50 rounded-xl mr-4">
-                                <FileTextIcon className="w-6 h-6 text-green-600" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-bold text-gray-900 truncate mb-1">{post.title}</p>
-                                <p className="text-xs text-gray-600 line-clamp-2">{post.description || '文章摘要'}</p>
-                              </div>
-                              <svg className="w-5 h-5 text-green-400 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                              </svg>
-                            </div>
-                          </div>
-                        )}
-
-                        {post.contentType === 'file' && (
-                          <div className="mt-5 p-5 bg-gradient-to-br from-blue-50/50 to-indigo-50/30 rounded-2xl border border-blue-100/60 backdrop-blur-sm">
-                            <div className="flex items-center">
-                              <div className="p-3 bg-blue-100/50 rounded-xl mr-4">
-                                <FileTextIcon className="h-6 w-6 text-blue-600" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-bold text-gray-900 truncate mb-1">{post.title || post.originalName}</p>
-                                <p className="text-xs text-gray-600 mb-1">{post.mimeType || '文件'}</p>
-                                <p className="text-xs text-gray-500">{post.size ? `${(post.size / 1024).toFixed(1)} KB` : '未知大小'}</p>
-                              </div>
-                              <button
-                                onClick={() => {
-                                  // 如果文件有 fileUrl，直接使用 TOS URL 下载
-                                  if (post.mediaUrl) {
-                                    window.open(post.mediaUrl, '_blank');
-                                  } else {
-                                    // 否则跳转到文件详情页
-                                    navigate(`/files/${post.originalId || post.id}`);
-                                  }
-                                }}
-                                className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded-xl hover:from-blue-600 hover:to-indigo-600 text-sm font-semibold shadow-sm hover:shadow-md transition-all"
-                              >
-                                下载
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {!post.contentType && post.originalName && (
-                          <div className="mt-5 p-5 bg-gradient-to-br from-blue-50/50 to-indigo-50/30 rounded-2xl border border-blue-100/60 backdrop-blur-sm">
-                            <div className="flex items-center">
-                              <div className="p-3 bg-blue-100/50 rounded-xl mr-4">
-                                <FileTextIcon className="h-6 w-6 text-blue-600" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-bold text-gray-900 truncate mb-1">{post.title || post.originalName}</p>
-                                <p className="text-xs text-gray-600 mb-1">{post.mimeType || '文件'}</p>
-                                <p className="text-xs text-gray-500">{post.size ? `${(post.size / 1024).toFixed(1)} KB` : '未知大小'}</p>
-                              </div>
-                              <a
-                                href={`/api/files/download/${post.originalId || post.id}`}
-                                className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded-xl hover:from-blue-600 hover:to-indigo-600 text-sm font-semibold shadow-sm hover:shadow-md transition-all"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                              >
-                                下载
-                              </a>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Post actions */}
-                      <div className="px-6 py-4 border-t border-blue-100/50 bg-gradient-to-r from-blue-50/20 to-purple-50/10">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-4">
-                            <button
-                              onClick={() => handleLike(post.id)}
-                              className={`flex items-center space-x-2 px-4 py-2 rounded-xl transition-all ${
-                                post.liked 
-                                  ? 'text-red-600 bg-red-50/50 hover:bg-red-100/50' 
-                                  : 'text-gray-600 hover:text-red-600 hover:bg-red-50/30'
-                              }`}
-                            >
-                              <HeartIcon className={`h-5 w-5 ${post.liked ? 'fill-current' : ''}`} />
-                              <span className="text-sm font-semibold">{post.likes}</span>
-                            </button>
-                            <button className="flex items-center space-x-2 px-4 py-2 rounded-xl text-gray-600 hover:text-blue-600 hover:bg-blue-50/30 transition-all">
-                              <MessageCircleIcon className="h-5 w-5" />
-                              <span className="text-sm font-semibold">{post.comments}</span>
-                            </button>
-                            <button className="flex items-center space-x-2 px-4 py-2 rounded-xl text-gray-600 hover:text-green-600 hover:bg-green-50/30 transition-all">
-                              <ShareIcon className="h-5 w-5" />
-                              <span className="text-sm font-semibold">{post.shares}</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
-                    <FileTextIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">暂无内容</h3>
-                    <p className="text-gray-500 mb-4">还没有任何分享</p>
-                    <button
-                      onClick={() => window.location.href = '/upload'}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                    >
-                      创建第一个分享
-                    </button>
-                  </div>
-                )}
+                {/* Posts feed with filter */}
+                <PostFeed
+                  posts={posts.map(post => ({
+                    ...post,
+                    author: {
+                      ...post.author,
+                      title: post.author.title || '',
+                      company: post.author.company || '',
+                    },
+                  })) as PostCardPost[]}
+                          currentUserId={user?.id}
+                  contentFilter={contentFilter}
+                  onFilterChange={setContentFilter}
+                  showFilter={true}
+                  showMyFilter={true}
+                  followingUserIds={followingUsers}
+                  onLike={handleLike}
+                  onToggleComments={handleToggleComments}
+                  onShare={(post) => handleShare(post as any)}
+                  onEdit={(post) => handleEdit(post as any)}
+                  onDelete={(postId) => setDeletingPostId(postId)}
+                  onImageModalOpen={openImageModal}
+                  postComments={postComments}
+                  loadingComments={loadingComments}
+                  onAddComment={handleAddComment}
+                  onDeleteComment={handleDeleteComment}
+                  expandedComments={expandedComments}
+                  showActions={true}
+                  emptyStateAction={
+                    contentFilter === 'all' ? (
+                      <button
+                        onClick={() => setIsPostModalOpen(true)}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                      >
+                        发布第一条动态
+                      </button>
+                    ) : undefined
+                  }
+                />
               </>
             )}
 
@@ -1140,31 +1535,85 @@ const Home = () => {
             {activeTab === 'network' && (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">职场人脉</h3>
-                <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {connections.length > 0 ? (
                     connections.map((connection) => (
-                      <div key={connection.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-                        <div className="flex items-center">
-                          <img
-                            className="h-12 w-12 rounded-full"
-                            src={connection.avatar || `https://ui-avatars.com/api/?name=${connection.name}&background=random`}
-                            alt={connection.name}
-                          />
-                          <div className="ml-4">
-                            <h4 className="text-sm font-semibold text-gray-900">{connection.name}</h4>
-                            <p className="text-sm text-gray-600">{connection.title} · {connection.company}</p>
-                          </div>
+                      <div key={connection.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow bg-white">
+                        <div className="flex flex-col items-center text-center">
+                          <Link to={`/profile/${connection.name}`} className="block w-full">
+                            <img
+                              className="h-20 w-20 rounded-full mx-auto mb-3 border-2 border-gray-100 cursor-pointer hover:border-blue-300 transition-colors"
+                              src={connection.avatar || getDefaultAvatar(connection.name)}
+                              alt={connection.name}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                navigate(`/profile/${connection.name}`);
+                              }}
+                            />
+                            <h4 
+                              className="text-sm font-semibold text-gray-900 mb-1 hover:text-blue-600 transition-colors cursor-pointer"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                navigate(`/profile/${connection.name}`);
+                              }}
+                            >
+                              {connection.name}
+                            </h4>
+                            <p className="text-xs text-gray-600 mb-1">{connection.title || '未设置职位'}</p>
+                            <p className="text-xs text-gray-500 mb-3">{connection.company || '未设置公司'}</p>
+                          </Link>
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              if (!user || !connection.userId) {
+                                navigate('/login');
+                                return;
+                              }
+                              
+                              const userId = connection.userId;
+                              
+                              setFollowingLoading(prev => ({ ...prev, [userId]: true }));
+                              
+                              try {
+                                // 因为这是关注列表，所以都是已关注状态，点击就是取消关注
+                                  const result: any = await unfollowUser(userId);
+                                  if (result?.code === 0 || result?.data?.code === 0) {
+                                    setFollowingUsers(prev => {
+                                      const next = new Set(prev);
+                                      next.delete(userId);
+                                      return next;
+                                    });
+                                  // 从连接列表中移除
+                                  setConnections(prev => prev.filter(conn => conn.userId !== userId));
+                                  // 从关注列表中移除
+                                  setFollowing(prev => prev.filter((u: any) => u.id !== userId));
+                                    setUserStats(prev => ({ ...prev, following: Math.max(0, prev.following - 1) }));
+                                  } else {
+                                    console.error('取消关注失败:', result);
+                                    setError(result?.msg || '取消关注失败');
+                                }
+                              } catch (err: any) {
+                                console.error('取消关注失败:', err);
+                                setError(err.message || '操作失败');
+                              } finally {
+                                setFollowingLoading(prev => ({ ...prev, [userId]: false }));
+                              }
+                            }}
+                            disabled={followingLoading[connection.userId || 0]}
+                            className={`w-full text-xs px-4 py-2 rounded-lg transition-colors font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300 ${
+                              followingLoading[connection.userId || 0] ? 'opacity-50 cursor-not-allowed' : ''
+                            }`}
+                          >
+                            {followingLoading[connection.userId || 0] ? '处理中...' : '取消关注'}
+                          </button>
                         </div>
-                        <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">
-                          关注
-                        </button>
                       </div>
                     ))
                   ) : (
-                    <div className="text-center py-8">
+                    <div className="col-span-full text-center py-8">
                       <UsersIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                       <h3 className="text-lg font-medium text-gray-900 mb-2">暂无人脉</h3>
-                      <p className="text-gray-500 mb-4">您还没有任何连接</p>
+                      <p className="text-gray-500 mb-4">您还没有关注任何人</p>
                       <button
                         onClick={() => setActiveTab('feed')}
                         className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
@@ -1180,68 +1629,12 @@ const Home = () => {
           </div>
 
           {/* Right sidebar - Activity and trends */}
-          <div className="lg:col-span-3 space-y-6">
-            {/* Trending topics */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">热门标签</h3>
-              <div className="space-y-3">
-                {(user?.skills || []).slice(0, 4).map((skill, index) => (
-                  <div key={index} className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">#{skill}</p>
-                      <p className="text-xs text-gray-500">你关注的标签</p>
-                    </div>
-                    <button className="text-xs bg-blue-50 text-blue-600 px-3 py-1 rounded-full hover:bg-blue-100 transition-colors">
-                      关注
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-
+          <div className="lg:col-span-3 space-y-6 lg:sticky lg:top-16 lg:self-start">
             {/* Recent activity */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">近期活动</h3>
               <div className="space-y-4">
-                <div className="flex items-start">
-                  <div className="flex-shrink-0">
-                    <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                      <UserIcon className="h-5 w-5 text-blue-600" />
-                    </div>
-                  </div>
-                  <div className="ml-3">
-                    <p className="text-sm text-gray-900">
-                      <span className="font-semibold">{user?.username || '你'}</span> 上传了新文件
-                    </p>
-                    <p className="text-xs text-gray-500">刚刚</p>
-                  </div>
-                </div>
-                <div className="flex items-start">
-                  <div className="flex-shrink-0">
-                    <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
-                      <HeartIcon className="h-5 w-5 text-green-600" />
-                    </div>
-                  </div>
-                  <div className="ml-3">
-                    <p className="text-sm text-gray-900">
-                      某用户 点赞了你的文件
-                    </p>
-                    <p className="text-xs text-gray-500">2小时以前</p>
-                  </div>
-                </div>
-                <div className="flex items-start">
-                  <div className="flex-shrink-0">
-                    <div className="h-10 w-10 rounded-full bg-purple-100 flex items-center justify-center">
-                      <CalendarIcon className="h-5 w-5 text-purple-600" />
-                    </div>
-                  </div>
-                  <div className="ml-3">
-                    <p className="text-sm text-gray-900">
-                      你加入了平台
-                    </p>
-                    <p className="text-xs text-gray-500">1个月以前</p>
-                  </div>
-                </div>
+                <RecentActivity activities={recentActivities} />
               </div>
             </div>
 
@@ -1270,6 +1663,146 @@ const Home = () => {
           </div>
         </div>
       </div>
+
+      {/* 统计详情模态框 */}
+      {statsModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          onClick={closeStatsModal}
+        >
+          <div 
+            className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col m-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 模态框头部 */}
+            <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <h3 className="text-xl font-semibold text-gray-900">
+                {statsModalType === 'files' ? '文件' : statsModalType === 'followers' ? '粉丝' : '关注'}
+              </h3>
+              <button
+                onClick={closeStatsModal}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <XIcon className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* 模态框内容 */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {statsModalLoading ? (
+                <div className="flex justify-center items-center py-12">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+                </div>
+              ) : statsModalData.length > 0 ? (
+                <div className="space-y-3">
+                  {statsModalData.map((item: any) => {
+                    if (statsModalType === 'files') {
+                      return (
+                        <div key={item.id} className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                          <FileTextIcon className="h-10 w-10 text-blue-500 mr-4" />
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-sm font-medium text-gray-900 truncate">{item.title || item.original_name}</h4>
+                            <p className="text-xs text-gray-500 mt-1">
+                              {item.size ? `${(item.size / 1024).toFixed(1)} KB` : '未知大小'} · {item.mime_type || '未知类型'}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    } else {
+                      // 粉丝或关注列表
+                      return (
+                        <div key={item.id} className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                          <img
+                            className="h-12 w-12 rounded-full object-cover cursor-pointer border-2 border-gray-100 hover:border-blue-300 transition-colors"
+                            src={item.avatar || getDefaultAvatar(item.username)}
+                            alt={item.username}
+                            onClick={() => {
+                              navigate(`/profile/${item.username}`);
+                              closeStatsModal();
+                            }}
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = getDefaultAvatar(item.username);
+                            }}
+                          />
+                          <div className="ml-4 flex-1 min-w-0">
+                            <h4 
+                              className="text-sm font-semibold text-gray-900 cursor-pointer hover:text-blue-600 truncate"
+                              onClick={() => {
+                                navigate(`/profile/${item.username}`);
+                                closeStatsModal();
+                              }}
+                            >
+                              {item.username}
+                            </h4>
+                            {item.bio && (
+                              <p className="text-xs text-gray-500 mt-1 line-clamp-2">{item.bio}</p>
+                            )}
+                            {item.position && (
+                              <p className="text-xs text-gray-600 mt-1">{item.position}</p>
+                            )}
+                          </div>
+                          {user && item.id !== user.id && (
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                const userId = item.id;
+                                const isCurrentlyFollowing = followingUsers.has(userId) || item.isFollowing;
+                                
+                                setFollowingLoading(prev => ({ ...prev, [userId]: true }));
+                                
+                                try {
+                                  if (isCurrentlyFollowing) {
+                                    const result: any = await unfollowUser(userId);
+                                    if (result?.code === 0 || result?.data?.code === 0) {
+                                      setFollowingUsers(prev => {
+                                        const next = new Set(prev);
+                                        next.delete(userId);
+                                        return next;
+                                      });
+                                      setStatsModalData(prev => prev.map(u => u.id === userId ? { ...u, isFollowing: false } : u));
+                                      setUserStats(prev => ({ ...prev, following: Math.max(0, prev.following - 1) }));
+                                    }
+                                  } else {
+                                    const result: any = await followUser(userId);
+                                    if (result?.code === 0 || result?.data?.code === 0) {
+                                      setFollowingUsers(prev => new Set(prev).add(userId));
+                                      setStatsModalData(prev => prev.map(u => u.id === userId ? { ...u, isFollowing: true } : u));
+                                      setUserStats(prev => ({ ...prev, following: prev.following + 1 }));
+                                    }
+                                  }
+                                } catch (err: any) {
+                                  console.error('关注操作失败:', err);
+                                } finally {
+                                  setFollowingLoading(prev => ({ ...prev, [userId]: false }));
+                                }
+                              }}
+                              disabled={followingLoading[item.id]}
+                              className={`px-4 py-2 text-sm rounded-full transition-colors ml-4 ${
+                                (followingUsers.has(item.id) || item.isFollowing)
+                                  ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                  : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                              } ${followingLoading[item.id] ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            >
+                              {followingLoading[item.id] ? '处理中...' : 
+                               (followingUsers.has(item.id) || item.isFollowing) ? '已关注' : '关注'}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    }
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <p className="text-gray-500">
+                    {statsModalType === 'files' ? '暂无文件' : statsModalType === 'followers' ? '暂无粉丝' : '暂无关注'}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
      </div>
   );

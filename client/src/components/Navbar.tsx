@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { getSearchSuggestions } from '../api/search';
 import { getUnreadCount } from '../api/notifications';
 import { User } from '../types';
+import { getDefaultAvatar } from '../utils/commonUtils';
 import {
   SearchIcon,
   BellIcon,
@@ -32,10 +33,17 @@ const Navbar: React.FC<NavbarProps> = ({ activeTab, onTabChange }) => {
   useEffect(() => {
     const fetchUnreadCount = async () => {
       try {
-        const response = await getUnreadCount();
-        setUnreadCount(response.data?.data?.count || 0);
+        const response: any = await getUnreadCount();
+        console.log('未读通知API响应:', response);
+        // 尝试多种可能的响应格式
+        const count = response?.data?.data?.count 
+          || response?.data?.count 
+          || 0;
+        console.log('解析的未读数量:', count, 'unreadCount状态:', unreadCount);
+        setUnreadCount(Number(count) || 0);
       } catch (err: any) {
         console.error('获取未读通知数量失败:', err);
+        setUnreadCount(0);
       }
     };
 
@@ -45,6 +53,8 @@ const Navbar: React.FC<NavbarProps> = ({ activeTab, onTabChange }) => {
       // 每30秒更新一次未读通知数量
       const interval = setInterval(fetchUnreadCount, 30000);
       return () => clearInterval(interval);
+    } else {
+      setUnreadCount(0);
     }
   }, [user]);
 
@@ -161,27 +171,39 @@ const Navbar: React.FC<NavbarProps> = ({ activeTab, onTabChange }) => {
             {/* 通知按钮 */}
             <Link
               to="/notifications"
-              className="relative p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-full transition-colors"
+              className={`relative p-2 rounded-full transition-colors ${
+                unreadCount > 0
+                  ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-50'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+              title={unreadCount > 0 ? `您有 ${unreadCount} 条未读通知` : '通知'}
             >
-              <BellIcon className="h-6 w-6" />
+              <BellIcon className={`h-6 w-6 ${unreadCount > 0 ? 'animate-pulse' : ''}`} />
               {unreadCount > 0 && (
-                <span className="absolute top-0 right-0 inline-flex items-center justify-center w-5 h-5 text-xs font-bold leading-none text-white bg-red-500 rounded-full">
-                  {unreadCount > 99 ? '99+' : unreadCount}
-                </span>
+                <>
+                  {/* 外圈脉冲动画 */}
+                  <span className="absolute top-0 right-0 inline-flex items-center justify-center w-5 h-5 z-0 pointer-events-none">
+                    <span className="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75 animate-ping"></span>
+                  </span>
+                  {/* 红色圆点提示 */}
+                  <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-xs font-bold leading-none text-white bg-red-500 rounded-full z-10 border-2 border-white shadow-lg">
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                </>
               )}
             </Link>
 
             {/* 消息按钮 */}
-            <button className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-full transition-colors">
+            {/* <button className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-full transition-colors">
               <MailIcon className="h-6 w-6" />
-            </button>
+            </button> */}
 
             {/* 用户信息 */}
             <div className="flex items-center space-x-3">
               <Link to={`/profile/${user?.username}`}>
                 <img
                   className="h-8 w-8 rounded-full cursor-pointer hover:ring-2 hover:ring-blue-500 transition-all"
-                  src={user?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?ixlib=rb-1.2.1&auto=format&fit=crop&w=200&q=80'}
+                  src={user?.avatar || getDefaultAvatar(user?.username)}
                   alt={user?.username}
                 />
               </Link>

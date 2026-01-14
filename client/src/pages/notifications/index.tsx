@@ -2,12 +2,30 @@ import React, { useState, useEffect } from 'react';
 import { BellIcon, CheckIcon, TrashIcon, MailIcon, HeartIcon, MessageCircleIcon, UserPlusIcon } from 'lucide-react';
 import { getNotifications, markNotificationsAsRead, deleteNotification, getUnreadCount } from '../../api/notifications';
 import { useAuth } from '../../contexts/AuthContext';
+import { formatRelativeTime } from '../../utils/commonUtils';
+
+interface Notification {
+  id: number;
+  userId: number;
+  type: string;
+  title: string;
+  content: string;
+  fromUserId?: number;
+  fromUsername?: string;
+  fromUser?: { username: string };
+  relatedType?: string;
+  relatedId?: number;
+  isRead: number;
+  readAt?: string;
+  createdAt?: string;
+  created_at?: string;
+}
 
 const Notifications = () => {
-  const [notifications, setNotifications] = useState([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [selectedNotifications, setSelectedNotifications] = useState([]);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedNotifications, setSelectedNotifications] = useState<number[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
 
@@ -21,13 +39,24 @@ const Notifications = () => {
   const fetchNotifications = async () => {
     try {
       setLoading(true);
-      const response = await getNotifications({
+      const response: any = await getNotifications({
         page: 1,
         limit: 20,
         unreadOnly: showUnreadOnly
       });
-      setNotifications(response.data.notifications || []);
-    } catch (err) {
+      // 处理API响应格式
+      const notificationsData = response?.data?.notifications || response?.data?.data?.notifications || response?.notifications || [];
+      console.log('通知数据:', notificationsData);
+      // 确保每个通知都有正确的字段名（统一处理下划线和驼峰格式）
+      const normalizedNotifications = notificationsData.map((notif: any) => ({
+        ...notif,
+        fromUsername: notif.from_username || notif.fromUsername || notif.fromUser?.username,
+        relatedType: notif.related_type || notif.relatedType,
+        createdAt: notif.created_at || notif.createdAt,
+        isRead: notif.is_read !== undefined ? notif.is_read : notif.isRead
+      }));
+      setNotifications(normalizedNotifications);
+    } catch (err: any) {
       setError(err.message || '获取通知失败');
     } finally {
       setLoading(false);
@@ -36,14 +65,15 @@ const Notifications = () => {
 
   const fetchUnreadCount = async () => {
     try {
-      const response = await getUnreadCount();
-      setUnreadCount(response.data.count || 0);
-    } catch (err) {
+      const response: any = await getUnreadCount();
+      const count = response?.data?.data?.count || response?.data?.count || 0;
+      setUnreadCount(Number(count) || 0);
+    } catch (err: any) {
       console.error('获取未读通知数量失败:', err);
     }
   };
 
-  const handleMarkAsRead = async (notificationIds = []) => {
+  const handleMarkAsRead = async (notificationIds: number[] = []) => {
     try {
       if (notificationIds.length > 0) {
         await markNotificationsAsRead(notificationIds);
@@ -69,19 +99,19 @@ const Notifications = () => {
       
       // 更新未读数量
       fetchUnreadCount();
-    } catch (err) {
+    } catch (err: any) {
       setError(err.message || '标记已读失败');
     }
   };
 
-  const handleDelete = async (id) => {
+  const handleDelete = async (id: number) => {
     try {
       await deleteNotification(id);
       setNotifications(prev => prev.filter(notification => notification.id !== id));
       if (notifications.find(n => n.id === id && !n.isRead)) {
         fetchUnreadCount(); // 如果删除的是未读通知，更新未读数量
       }
-    } catch (err) {
+    } catch (err: any) {
       setError(err.message || '删除通知失败');
     }
   };
@@ -93,7 +123,7 @@ const Notifications = () => {
     );
   };
 
-  const getNotificationIcon = (type) => {
+  const getNotificationIcon = (type: string) => {
     switch (type) {
       case 'like':
         return <HeartIcon className="h-5 w-5 text-red-500" />;
@@ -108,21 +138,39 @@ const Notifications = () => {
     }
   };
 
-  const getNotificationText = (notification) => {
-    const { type, title, content, fromUser } = notification;
-    const fromUsername = fromUser?.username || '某用户';
+  const getNotificationText = (notification: Notification) => {
+    const { type, title, content } = notification;
+    // 尝试多种可能的字段名来获取用户名
+    const fromUsername = notification.fromUser?.username 
+      || notification.fromUsername 
+      || (notification as any).from_username 
+      || '某用户';
     
     switch (type) {
       case 'like':
-        return `${fromUsername} 点赞了您的文件`;
+        return `${fromUsername} 点赞了您的${getRelatedTypeText(notification)}`;
       case 'comment':
-        return `${fromUsername} 评论了您的文件: "${content}"`;
+        return `${fromUsername} 评论了您的${getRelatedTypeText(notification)}: "${content}"`;
       case 'follow':
         return `${fromUsername} 开始关注您`;
       case 'message':
         return `${fromUsername} 给您发送了消息`;
       default:
         return content || title;
+    }
+  };
+
+  const getRelatedTypeText = (notification: Notification) => {
+    const relatedType = notification.relatedType || (notification as any).related_type;
+    switch (relatedType) {
+      case 'file':
+        return '文件';
+      case 'post':
+        return '帖子';
+      case 'article':
+        return '文章';
+      default:
+        return '内容';
     }
   };
 
@@ -242,7 +290,7 @@ const Notifications = () => {
                             </p>
                             <div className="flex items-center space-x-2">
                               <span className="text-xs text-gray-500">
-                                {new Date(notification.createdAt).toLocaleString()}
+                                {formatRelativeTime(notification.createdAt || notification.created_at)}
                               </span>
                               {!notification.isRead && (
                                 <button

@@ -3,7 +3,7 @@ import { body, validationResult } from 'express-validator';
 import { authenticateToken } from '../middleware/auth.js';
 import { getFileCategory, uploadMultiple, processFileUpload } from '../utils/upload.js';
 import { createFile, updateFile, deleteFile, getFileById } from '../services/fileService.js';
-import { likeFile, unlikeFile } from '../services/socialService.js';
+import { likeFile, unlikeFile, getTodayNewFollowersCount } from '../services/socialService.js';
 import { getMySQLPool } from '../config/database.js';
 
 const router = express.Router();
@@ -60,6 +60,13 @@ router.get('/my', authenticateToken, async (req, res) => {
       [userId]
     );
 
+    // 获取今日访客总数
+    const { getTodayVisitorCount } = await import('../services/visitorService.js');
+    const todayVisitors = await getTodayVisitorCount(userId);
+
+    // 获取今日新增粉丝数
+    const todayNewFollowers = await getTodayNewFollowersCount(userId);
+
     res.json({
       code: 0,
       data: {
@@ -78,7 +85,9 @@ router.get('/my', authenticateToken, async (req, res) => {
           totalFiles: filesCount[0].count,
           totalDownloads: totalDownloads[0].total,
           followerCount: followersCount[0].count,
-          followingCount: followingCount[0].count
+          followingCount: followingCount[0].count,
+          todayVisitors: todayVisitors,
+          todayNewFollowers: todayNewFollowers
         }
       },
       msg: '获取成功'
@@ -293,13 +302,46 @@ router.post('/files/:fileId/like', authenticateToken, async (req, res) => {
       });
     }
 
+    // 检查是否已点赞
+    const pool = getMySQLPool();
+    const [existing] = await pool.execute(
+      'SELECT id FROM file_likes WHERE file_id = ? AND user_id = ?',
+      [fileId, userId]
+    );
+    
+    if (existing.length > 0) {
+      // 已经点赞，返回成功
+      const [likes] = await pool.execute(
+        'SELECT COUNT(*) as count FROM file_likes WHERE file_id = ?',
+        [fileId]
+      );
+      res.json({
+        code: 0,
+        data: { 
+          liked: true,
+          likeCount: likes[0].count
+        },
+        msg: '已点赞'
+      });
+      return;
+    }
+
     // 添加点赞
     const success = await likeFile(userId, fileId);
 
     if (success) {
+      // 获取最新的点赞数
+      const [likes] = await pool.execute(
+        'SELECT COUNT(*) as count FROM file_likes WHERE file_id = ?',
+        [fileId]
+      );
+      
       res.json({
         code: 0,
-        data: { liked: true },
+        data: { 
+          liked: true,
+          likeCount: likes[0].count
+        },
         msg: '点赞成功'
       });
     } else {
@@ -344,9 +386,19 @@ router.delete('/files/:fileId/like', authenticateToken, async (req, res) => {
     const success = await unlikeFile(userId, fileId);
 
     if (success) {
+      // 获取最新的点赞数
+      const pool = getMySQLPool();
+      const [likes] = await pool.execute(
+        'SELECT COUNT(*) as count FROM file_likes WHERE file_id = ?',
+        [fileId]
+      );
+      
       res.json({
         code: 0,
-        data: { liked: false },
+        data: { 
+          liked: false,
+          likeCount: likes[0].count
+        },
         msg: '取消点赞成功'
       });
     } else {

@@ -1,6 +1,6 @@
 import express from 'express';
 import { body, validationResult } from 'express-validator';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, optionalAuth } from '../middleware/auth.js';
 import { getMySQLPool } from '../config/database.js';
 import { followUser, unfollowUser, getFollowingList, getFollowersList, likeFile, unlikeFile, addFileComment, getFileComments } from '../services/socialService.js';
 
@@ -30,7 +30,10 @@ router.post('/follow', authenticateToken, [
 
     if (followerId === followingId) {
       return res.status(400).json({
-        error: '不能关注自己'
+        code: 400,
+        data: null,
+        error: '不能关注自己',
+        msg: '不能关注自己'
       });
     }
 
@@ -52,18 +55,26 @@ router.post('/follow', authenticateToken, [
 
     if (success) {
       res.json({
-        message: '关注成功'
+        code: 0,
+        data: { following: true },
+        msg: '关注成功'
       });
     } else {
       res.status(400).json({
-        error: '关注失败或已经关注过该用户'
+        code: 400,
+        data: null,
+        error: '关注失败或已经关注过该用户',
+        msg: '关注失败或已经关注过该用户'
       });
     }
 
   } catch (error) {
     console.error('关注用户错误:', error);
     res.status(500).json({
-      error: '关注失败'
+      code: 500,
+      data: null,
+      error: '关注失败',
+      msg: error.message || '关注失败'
     });
   }
 });
@@ -82,18 +93,26 @@ router.delete('/follow/:userId', authenticateToken, async (req, res) => {
 
     if (success) {
       res.json({
-        message: '取消关注成功'
+        code: 0,
+        data: { following: false },
+        msg: '取消关注成功'
       });
     } else {
       res.status(400).json({
-        error: '未关注该用户'
+        code: 400,
+        data: null,
+        error: '未关注该用户',
+        msg: '未关注该用户'
       });
     }
 
   } catch (error) {
     console.error('取消关注错误:', error);
     res.status(500).json({
-      error: '取消关注失败'
+      code: 500,
+      data: null,
+      error: '取消关注失败',
+      msg: error.message || '取消关注失败'
     });
   }
 });
@@ -331,6 +350,142 @@ router.delete('/message/:messageId', authenticateToken, async (req, res) => {
     console.error('删除留言错误:', error);
     res.status(500).json({
       error: '删除留言失败'
+    });
+  }
+});
+
+/**
+ * @route   POST /api/social/comment
+ * @desc    添加文件评论
+ * @access  Private
+ */
+router.post('/comment', authenticateToken, [
+  body('fileId')
+    .isNumeric()
+    .withMessage('文件ID必须是数字'),
+  body('content')
+    .trim()
+    .notEmpty()
+    .withMessage('评论内容不能为空')
+    .isLength({ max: 1000 })
+    .withMessage('评论内容不能超过1000个字符')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        code: 400,
+        data: null,
+        error: '输入数据验证失败',
+        details: errors.array(),
+        msg: '输入数据验证失败'
+      });
+    }
+
+    const { fileId, content } = req.body;
+    const userId = req.user.id;
+
+    const comment = await addFileComment(parseInt(fileId), userId, content);
+
+    // 更新文件评论数
+    const pool = getMySQLPool();
+    await pool.execute(
+      'UPDATE user_files SET comment_count = comment_count + 1 WHERE id = ?',
+      [fileId]
+    );
+
+    res.status(201).json({
+      code: 0,
+      data: { comment },
+      msg: '评论成功'
+    });
+
+  } catch (error) {
+    console.error('添加文件评论错误:', error);
+    res.status(500).json({
+      code: 500,
+      data: null,
+      error: '添加评论失败',
+      msg: error.message || '添加评论失败'
+    });
+  }
+});
+
+/**
+ * @route   GET /api/social/files/:fileId/comments
+ * @desc    获取文件评论列表
+ * @access  Public
+ */
+router.get('/files/:fileId/comments', async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    const { page = 1, limit = 20 } = req.query;
+
+    const result = await getFileComments(
+      parseInt(fileId),
+      parseInt(page),
+      parseInt(limit)
+    );
+
+    res.json({
+      code: 0,
+      data: result,
+      msg: '获取成功'
+    });
+
+  } catch (error) {
+    console.error('获取文件评论列表错误:', error);
+    res.status(500).json({
+      code: 500,
+      data: null,
+      error: '获取评论列表失败',
+      msg: error.message || '获取评论列表失败'
+    });
+  }
+});
+
+/**
+ * @route   DELETE /api/social/files/:fileId/comments/:commentId
+ * @desc    删除文件评论
+ * @access  Private
+ */
+router.delete('/files/:fileId/comments/:commentId', authenticateToken, async (req, res) => {
+  try {
+    const { commentId, fileId } = req.params;
+    const userId = req.user.id;
+
+    const { deleteFileComment } = await import('../services/socialService.js');
+    const success = await deleteFileComment(parseInt(commentId), userId);
+
+    if (success) {
+      // 更新文件评论数
+      const pool = getMySQLPool();
+      await pool.execute(
+        'UPDATE user_files SET comment_count = GREATEST(comment_count - 1, 0) WHERE id = ?',
+        [fileId]
+      );
+
+      res.json({
+        code: 0,
+        data: null,
+        msg: '删除评论成功'
+      });
+    } else {
+      res.status(404).json({
+        code: 404,
+        data: null,
+        error: '评论不存在或无权删除',
+        msg: '评论不存在或无权删除'
+      });
+    }
+
+  } catch (error) {
+    console.error('删除文件评论错误:', error);
+    res.status(500).json({
+      code: 500,
+      data: null,
+      error: '删除评论失败',
+      msg: error.message || '删除评论失败'
     });
   }
 });

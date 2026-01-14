@@ -32,8 +32,22 @@ const PostCreationModal: React.FC<PostCreationModalProps> = ({ isOpen, onClose, 
       setContent(editingPost.content || '');
       setVisibility(editingPost.visibility || 'public');
       if (editingPost.mediaUrl) {
-        setImagePreview(editingPost.mediaUrl);
+        // 根据 mediaType 判断是图片还是视频
+        if (mediaType === 'video') {
+          setVideoPreview(editingPost.mediaUrl);
+          setImagePreview(null);
+        } else {
+          setImagePreview(editingPost.mediaUrl);
+          setVideoPreview(null);
+        }
+      } else {
+        // 如果没有 mediaUrl，清空所有预览
+        setImagePreview(null);
+        setVideoPreview(null);
       }
+      // 清空选中的文件（编辑模式下不自动选择文件）
+      setSelectedImage(null);
+      setSelectedVideo(null);
     } else if (isOpen && !editingPost) {
       // 创建模式，重置表单
       setContent('');
@@ -43,7 +57,7 @@ const PostCreationModal: React.FC<PostCreationModalProps> = ({ isOpen, onClose, 
       setSelectedVideo(null);
       setVisibility('public');
     }
-  }, [isOpen, editingPost]);
+  }, [isOpen, editingPost, mediaType]);
 
   if (!isOpen) return null;
 
@@ -73,7 +87,9 @@ const PostCreationModal: React.FC<PostCreationModalProps> = ({ isOpen, onClose, 
   };
 
   const handlePost = async () => {
-    if (!content.trim() && !selectedImage && !selectedVideo) return;
+    // 编辑模式下，即使没有新文件也可以提交（可能只是想更新内容或可见性）
+    // 创建模式下，必须有内容或文件
+    if (!editingPost && !content.trim() && !selectedImage && !selectedVideo) return;
     
     setIsUploading(true);
     try {
@@ -248,9 +264,9 @@ const PostCreationModal: React.FC<PostCreationModalProps> = ({ isOpen, onClose, 
           </button>
           <button
             onClick={handlePost}
-            disabled={isUploading || (!content.trim() && !selectedImage && !selectedVideo)}
+            disabled={isUploading || (!editingPost && !content.trim() && !selectedImage && !selectedVideo)}
             className={`px-8 py-2.5 rounded-xl text-white transition-all font-semibold shadow-lg ${
-              isUploading || (!content.trim() && !selectedImage && !selectedVideo)
+              isUploading || (!editingPost && !content.trim() && !selectedImage && !selectedVideo)
                 ? 'bg-gray-300 cursor-not-allowed'
                 : 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 hover:shadow-xl transform hover:scale-105 active:scale-100'
             }`}
